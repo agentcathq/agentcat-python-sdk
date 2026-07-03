@@ -9,6 +9,7 @@ import requests
 from ...types import Event, SentryExporterConfig
 from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
+from ...modules.session import get_agentcat_version
 from . import Exporter
 from .trace_context import trace_context
 
@@ -42,7 +43,8 @@ class SentryExporter(Exporter):
         self.endpoint = f"{protocol}://{host}{port}{path}/api/{project_id}/envelope/"
 
         # Build auth header
-        self.auth_header = f"Sentry sentry_version=7, sentry_client=agentcat/1.0.0, sentry_key={self.parsed_dsn['public_key']}"
+        sdk_version = get_agentcat_version() or "unknown"
+        self.auth_header = f"Sentry sentry_version=7, sentry_client=agentcat/{sdk_version}, sentry_key={self.parsed_dsn['public_key']}"
 
         # Create session for connection pooling
         self.session = requests.Session()

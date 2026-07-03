@@ -9,6 +9,7 @@ import requests
 from ...types import Event, OTLPExporterConfig
 from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
+from ...modules.session import get_agentcat_version
 from . import Exporter
 from .trace_context import trace_context
 
@@ -69,7 +70,9 @@ class OTLPExporter(Exporter):
                             {
                                 "scope": {
                                     "name": "agentcat",
-                                    "version": event.agentcat_version or "0.1.0",
+                                    "version": event.agentcat_version
+                                    or get_agentcat_version()
+                                    or "unknown",
                                 },
                                 "spans": [span],
                             }
