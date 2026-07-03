@@ -180,12 +180,12 @@ class MCPCatOptions:
     debug_mode: bool = False
     api_base_url: str | None = None
     stateless: bool | None = None
-    # Disables MCPCat's internal SDK diagnostics — anonymous, metadata-only
+    # Disables AgentCat's internal SDK diagnostics — anonymous, metadata-only
     # setup/error reporting used to detect failed installs. On by default; also
     # disable-able via the DISABLE_DIAGNOSTICS env var. Automatically disabled in
     # test environments (PYTEST_CURRENT_TEST / PYTEST_VERSION set) so test suites
     # never send anything; set DISABLE_DIAGNOSTICS=false to re-enable there. Never
-    # sends event payloads or user data; the local ~/mcpcat.log is unaffected.
+    # sends event payloads or user data; the local ~/agentcat.log is unaffected.
     disable_diagnostics: bool = False
     # Callback invoked on every auto-captured event (initialize, tools/list,
     # tools/call) to attach string key-value tags. Tags are intended for

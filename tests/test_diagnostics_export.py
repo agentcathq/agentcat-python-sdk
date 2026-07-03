@@ -40,7 +40,7 @@ def test_flush_posts_otlp_shaped_json():
             a["key"]: a["value"]["stringValue"]
             for a in payload["resourceLogs"][0]["resource"]["attributes"]
         }
-        assert resource_attrs.get("mcpcat.project_id") == "proj_1"
+        assert resource_attrs.get("agentcat.project_id") == "proj_1"
 
 
 def test_flush_swallows_post_errors():

@@ -1,12 +1,12 @@
 """Privacy-first internal SDK diagnostics.
 
-Mirrors every internal MCPCat log line to MCPCat's own monitoring as an
+Mirrors every internal AgentCat log line to AgentCat's own monitoring as an
 OTLP/HTTP log record, so we can detect when a developer's SDK fails to set up.
 
 **Only operational metadata is ever sent — never event payloads or user data.**
 Records carry environment/identity metadata (the attempted ``project_id``, or an
 anonymous install-id hash when none) plus a metadata-only message body. The local
-``~/mcpcat.log`` is unaffected.
+``~/agentcat.log`` is unaffected.
 
 On by default; opt out via ``MCPCatOptions(disable_diagnostics=True)`` or the
 ``DISABLE_DIAGNOSTICS`` env var. Auto-disabled in test environments
@@ -154,17 +154,17 @@ def _build_static_attributes(project_id: str | None) -> list[dict[str, Any]]:
     try:
         # Identity / traceability
         if project_id:
-            out += _attr("mcpcat.project_id", project_id)
+            out += _attr("agentcat.project_id", project_id)
         else:
-            out += _attr("mcpcat.install_id", _compute_install_id())
+            out += _attr("agentcat.install_id", _compute_install_id())
 
         # SDK
-        out += _attr("mcpcat.sdk.language", "python")
-        out += _attr("mcpcat.sdk.version", _sdk_version())
+        out += _attr("agentcat.sdk.language", "python")
+        out += _attr("agentcat.sdk.version", _sdk_version())
 
         # Best-effort: resolved MCP SDK version (distribution name may differ).
         try:
-            out += _attr("mcpcat.mcp_sdk.version", version("mcp"))
+            out += _attr("agentcat.mcp_sdk.version", version("mcp"))
         except Exception:
             pass
 

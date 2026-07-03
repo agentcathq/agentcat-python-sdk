@@ -13,7 +13,7 @@ MAX_EXCEPTION_CHAIN_DEPTH = 10
 MAX_STACK_FRAMES = 50
 
 # Internal SDK diagnostics (privacy-first, metadata-only OTLP logs)
-DIAGNOSTICS_SCOPE_NAME = "mcpcat-diagnostics"
+DIAGNOSTICS_SCOPE_NAME = "agentcat-diagnostics"
 DEFAULT_DIAGNOSTICS_ENDPOINT = "https://otel.agentcat.com"
 # Public shared ingestion key — NOT a secret; ships in the package to deter
 # drive-by traffic, paired with a server-side rate limit. Override with the
