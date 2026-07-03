@@ -61,7 +61,7 @@ Every commit passes `uv run pytest` (full suite). Behavior-adjacent changes land
 ### 3. Logging + diagnostics
 - `logging.py:47-48` + `constants.py` `LOG_PATH`: `~/mcpcat.log` → `~/agentcat.log`, no fallback.
 - `diagnostics.py`: attribute keys `mcpcat.project_id|install_id|sdk.language|sdk.version|mcp_sdk.version` → `agentcat.*`; scope name → `agentcat-diagnostics`. Unchanged: `DISABLE_DIAGNOSTICS` / `DIAGNOSTICS_*` env names (brand-free), endpoint (already `otel.agentcat.com`), token. Collector-side dashboard flip is already tracked in REBRAND.md §3.3 note — applies to Python identically.
-- **DOA-critical:** the three distribution-name lookups `version("mcpcat")` → `version("agentcat")`: `__init__.py:9`, `session.py:28`, `diagnostics.py:55`. Miss any and `import agentcat` raises `PackageNotFoundError` (§3.4 M1).
+- **DOA-critical:** the three distribution-name lookups `version("mcpcat")` → `version("agentcat")`: `__init__.py:9`, `session.py:28`, `diagnostics.py:55`. Miss any and `import agentcat` raises `PackageNotFoundError` (§3.4 M1). **Timing:** these flip in commit 6 (package identity), not here — they resolve the *installed dist name*, which only changes when pyproject's `name` does; flipping earlier breaks every test run in between.
 
 ### 4. Exporter brand strings (accepted customer-side split, D3 §2C)
 - OTLP: scope/resource `"name": "mcpcat"` → `"agentcat"` (`otlp.py:71`), any `source` attr → `agentcat`.
