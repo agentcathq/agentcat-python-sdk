@@ -442,7 +442,7 @@ jobs:
         repo_tag = '${{ github.repository }}'.replace('/', '_')
 
         params = {
-            'from': 'no-reply@agentcat.com',  # Use Resend's default verified domain
+            'from': 'no-reply@agentcat.com',  # Requires agentcat.com verified in Resend (rebrand Phase 1)
             'to': [alert_email],  # Use variable, not inline secret
             'subject': subject_line,
             'html': email_html,

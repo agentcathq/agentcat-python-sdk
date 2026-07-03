@@ -25,6 +25,10 @@ class TestLogging:
 
         yield
 
+        # Reset debug mode so later teardown (e.g. event-queue shutdown)
+        # doesn't write a stray line to the real ~/agentcat.log
+        set_debug_mode(False)
+
         # Clean up after test
         if os.path.exists(log_path):
             os.remove(log_path)
