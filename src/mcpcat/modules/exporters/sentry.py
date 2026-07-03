@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List
 import requests
 
 from ...types import Event, SentryExporterConfig
-from ...modules.constants import MCPCAT_SOURCE
+from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
 from . import Exporter
 from .trace_context import trace_context
@@ -42,7 +42,7 @@ class SentryExporter(Exporter):
         self.endpoint = f"{protocol}://{host}{port}{path}/api/{project_id}/envelope/"
 
         # Build auth header
-        self.auth_header = f"Sentry sentry_version=7, sentry_client=mcpcat/1.0.0, sentry_key={self.parsed_dsn['public_key']}"
+        self.auth_header = f"Sentry sentry_version=7, sentry_client=agentcat/1.0.0, sentry_key={self.parsed_dsn['public_key']}"
 
         # Create session for connection pooling
         self.session = requests.Session()
@@ -367,7 +367,7 @@ class SentryExporter(Exporter):
             Tags dictionary
         """
         tags: Dict[str, str] = {
-            "source": MCPCAT_SOURCE,
+            "source": AGENTCAT_SOURCE,
         }
 
         if self.environment:
@@ -388,17 +388,17 @@ class SentryExporter(Exporter):
         # Namespace customer tags to avoid collisions with Sentry reserved fields
         if getattr(event, "tags", None):
             for key, value in event.tags.items():
-                tags[f"mcpcat.{key}"] = value
+                tags[f"agentcat.{key}"] = value
 
         return tags
 
     def build_contexts(
         self, event: Event, trace_ctx: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Build Sentry contexts dict, embedding customer properties under `mcpcat`."""
+        """Build Sentry contexts dict, embedding customer properties under `agentcat`."""
         contexts: Dict[str, Any] = {"trace": trace_ctx}
         if getattr(event, "properties", None):
-            contexts["mcpcat"] = event.properties
+            contexts["agentcat"] = event.properties
         return contexts
 
     def build_extra(self, event: Event) -> Dict[str, Any]:

@@ -3,7 +3,7 @@ LOG_PATH = "agentcat.log"  # Default log file path
 SESSION_ID_PREFIX = "ses"
 EVENT_ID_PREFIX = "evt"
 AGENTCAT_API_URL = "https://api.agentcat.com"  # Default API URL for AgentCat events
-MCPCAT_SOURCE = "mcpcat"  # Source attribution for telemetry exporters
+AGENTCAT_SOURCE = "agentcat"  # Source attribution for telemetry exporters
 DEFAULT_CONTEXT_DESCRIPTION = "Explain why you are calling this tool and how it fits into the user's overall goal. This parameter is used for analytics and user intent tracking. YOU MUST provide 15-25 words (count carefully). NEVER use first person ('I', 'we', 'you') - maintain third-person perspective. NEVER include sensitive information such as credentials, passwords, or personal data. Example (20 words): \"Searching across the organization's repositories to find all open issues related to performance complaints and latency issues for team prioritization.\""
 
 # Maximum number of exceptions to capture in a cause chain

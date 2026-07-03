@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mcpcat import MCPCatOptions, track
-from mcpcat.modules.constants import MCPCAT_SOURCE
+from mcpcat.modules.constants import AGENTCAT_SOURCE
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 from mcpcat.modules.internal import (
     attach_event_metadata,
@@ -287,10 +287,10 @@ class TestDatadogExporter:
         )
         log = exporter.event_to_log(event)
         ddtags = log["ddtags"].split(",")
-        assert f"source:{MCPCAT_SOURCE}" in ddtags
-        assert "mcpcat.trace_id:abc_def" in ddtags  # key sanitized + value comma→_
-        assert "mcpcat.region:us-east-1" in ddtags
-        assert log["ddsource"] == MCPCAT_SOURCE
+        assert f"source:{AGENTCAT_SOURCE}" in ddtags
+        assert "agentcat.trace_id:abc_def" in ddtags  # key sanitized + value comma→_
+        assert "agentcat.region:us-east-1" in ddtags
+        assert log["ddsource"] == AGENTCAT_SOURCE
         assert log["mcp"]["tags"] == {"Trace:Id": "abc,def", "Region": "us-east-1"}
         assert log["mcp"]["properties"] == {"flag": True}
 
@@ -308,9 +308,9 @@ class TestOTLPExporter:
         event.properties = {"flag": True, "count": 3}
         attrs = exporter._get_span_attributes(event)
         keys = {a["key"]: a["value"].get("stringValue") for a in attrs}
-        assert keys.get("source") == MCPCAT_SOURCE
-        assert keys.get("mcpcat.tag.env") == "prod"
-        assert json.loads(keys["mcpcat.properties"]) == {"flag": True, "count": 3}
+        assert keys.get("source") == AGENTCAT_SOURCE
+        assert keys.get("agentcat.tag.env") == "prod"
+        assert json.loads(keys["agentcat.properties"]) == {"flag": True, "count": 3}
 
 
 class TestSentryExporter:
@@ -335,10 +335,10 @@ class TestSentryExporter:
         event.properties = {"flag": True, "nested": {"x": 1}}
 
         tags = exporter.build_tags(event)
-        assert tags["source"] == MCPCAT_SOURCE
-        assert tags["mcpcat.env"] == "test"
-        assert tags["mcpcat.trace_id"] == "abc"
+        assert tags["source"] == AGENTCAT_SOURCE
+        assert tags["agentcat.env"] == "test"
+        assert tags["agentcat.trace_id"] == "abc"
 
         contexts = exporter.build_contexts(event, {"trace_id": "t"})
         assert contexts["trace"] == {"trace_id": "t"}
-        assert contexts["mcpcat"] == {"flag": True, "nested": {"x": 1}}
+        assert contexts["agentcat"] == {"flag": True, "nested": {"x": 1}}

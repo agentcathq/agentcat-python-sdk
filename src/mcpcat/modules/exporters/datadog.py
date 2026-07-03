@@ -7,7 +7,7 @@ from typing import Dict, List, Any
 import requests
 
 from ...types import Event, DatadogExporterConfig
-from ...modules.constants import MCPCAT_SOURCE
+from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
 from . import Exporter
 from .trace_context import trace_context
@@ -141,13 +141,13 @@ class DatadogExporter(Exporter):
         if event.is_error:
             tags.append("error:true")
 
-        tags.append(f"source:{MCPCAT_SOURCE}")
+        tags.append(f"source:{AGENTCAT_SOURCE}")
 
         # Add customer-defined tags (namespaced to avoid collisions with reserved Datadog tags)
         if getattr(event, "tags", None):
             for key, value in event.tags.items():
                 tags.append(
-                    f"mcpcat.{_sanitize_dd_tag_key(key)}:{_sanitize_dd_tag_value(value)}"
+                    f"agentcat.{_sanitize_dd_tag_key(key)}:{_sanitize_dd_tag_value(value)}"
                 )
 
         # Get timestamp in milliseconds
@@ -160,7 +160,7 @@ class DatadogExporter(Exporter):
         log: Dict[str, Any] = {
             "message": f"{event.event_type or 'unknown'} - {event.resource_name or 'unknown'}",
             "service": self.service,
-            "ddsource": MCPCAT_SOURCE,
+            "ddsource": AGENTCAT_SOURCE,
             "ddtags": ",".join(tags),
             "timestamp": timestamp_ms,
             "status": "error" if event.is_error else "info",

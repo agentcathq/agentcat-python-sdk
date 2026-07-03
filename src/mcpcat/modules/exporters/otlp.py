@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ...types import Event, OTLPExporterConfig
-from ...modules.constants import MCPCAT_SOURCE
+from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
 from . import Exporter
 from .trace_context import trace_context
@@ -68,7 +68,7 @@ class OTLPExporter(Exporter):
                         "scopeSpans": [
                             {
                                 "scope": {
-                                    "name": "mcpcat",
+                                    "name": "agentcat",
                                     "version": event.agentcat_version or "0.1.0",
                                 },
                                 "spans": [span],
@@ -150,7 +150,7 @@ class OTLPExporter(Exporter):
 
         # Add SDK information
         attributes.append(
-            {"key": "telemetry.sdk.name", "value": {"stringValue": "mcpcat-python"}}
+            {"key": "telemetry.sdk.name", "value": {"stringValue": "agentcat-python"}}
         )
 
         if event.agentcat_version:
@@ -174,7 +174,7 @@ class OTLPExporter(Exporter):
             List of attribute key-value pairs
         """
         attributes: List[Dict[str, Any]] = [
-            {"key": "source", "value": {"stringValue": MCPCAT_SOURCE}},
+            {"key": "source", "value": {"stringValue": AGENTCAT_SOURCE}},
         ]
 
         # Add MCP-specific attributes
@@ -242,14 +242,14 @@ class OTLPExporter(Exporter):
         # Add customer-defined tags as individual attributes
         for key, value in (getattr(event, "tags", None) or {}).items():
             attributes.append(
-                {"key": f"mcpcat.tag.{key}", "value": {"stringValue": value}}
+                {"key": f"agentcat.tag.{key}", "value": {"stringValue": value}}
             )
 
         # Add customer-defined properties as JSON
         if getattr(event, "properties", None):
             attributes.append(
                 {
-                    "key": "mcpcat.properties",
+                    "key": "agentcat.properties",
                     "value": {"stringValue": json.dumps(event.properties)},
                 }
             )
