@@ -60,6 +60,23 @@ There are no other API changes — `track()`, its options, the `identify` and re
 
 Your project ID does not change, and your dashboard history is continuous.
 
+## Or let an AI agent do it
+
+Paste this into your coding agent (Claude Code, Cursor, Copilot, etc.) from your project root:
+
+```text
+Migrate this project from the `mcpcat` PyPI package to its renamed successor `agentcat` (same API, new package name):
+
+1. Replace the `mcpcat` dependency with `agentcat` using this project's package manager (pip/uv/poetry; e.g. `pip uninstall mcpcat && pip install agentcat`). If the project uses the FastMCP extra, install "agentcat[community]".
+2. Update every `import mcpcat` / `from mcpcat import ...` to `import agentcat` / `from agentcat import ...`. There is no compatibility shim — this rename is required.
+3. Rename these types 1:1 wherever they're used: MCPCatOptions → AgentCatOptions, MCPCatData → AgentCatData. (UserIdentity is unchanged.)
+4. If the env var MCPCAT_API_URL appears anywhere (code, .env files, CI, deploy config), rename it to AGENTCAT_API_URL. (Optional — the old name is still read as a fallback.)
+5. If the env var MCPCAT_DEBUG_MODE appears anywhere, rename it to AGENTCAT_DEBUG_MODE. (Required — it has NO fallback.)
+6. Update any references to the log path ~/mcpcat.log → ~/agentcat.log.
+7. Do NOT change the project ID passed to track() — it stays the same.
+8. Run the project's tests to verify, and report anything that referenced mcpcat which you could not migrate mechanically (e.g. dashboards or filters keying on source=mcpcat).
+```
+
 ## Heads-up if you forward telemetry to your own tools
 
 If you use the exporters (Datadog, Sentry, OTLP), the `source` value and tag namespaces stamped into **your** observability platform change from `mcpcat` to `agentcat`. Update any saved filters, monitors, or dashboards that key on them — a one-time change on your side.
