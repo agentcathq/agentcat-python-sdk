@@ -154,8 +154,12 @@ def track(
         )
         set_server_tracking_data(lowlevel_server, data)
 
-        # Resolve API base URL: option > env var > default
-        api_base_url = options.api_base_url or os.environ.get("MCPCAT_API_URL")
+        # Resolve API base URL: option > new env var > legacy env var > default
+        api_base_url = (
+            options.api_base_url
+            or os.environ.get("AGENTCAT_API_URL")
+            or os.environ.get("MCPCAT_API_URL")
+        )
         if api_base_url:
             from mcpcat.modules.event_queue import event_queue
             event_queue.configure(api_base_url)

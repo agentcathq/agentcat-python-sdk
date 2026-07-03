@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
 from agentcat_api import ApiClient, Configuration, EventsApi
-from mcpcat.modules.constants import EVENT_ID_PREFIX, MCPCAT_API_URL
+from mcpcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
 
 from ..types import Event, UnredactedEvent
 from ..utils import generate_prefixed_ksuid
@@ -38,7 +38,7 @@ class EventQueue:
 
         # Allow injection of api_client for testing
         if api_client is None:
-            config = Configuration(host=MCPCAT_API_URL)
+            config = Configuration(host=AGENTCAT_API_URL)
             api_client_instance = ApiClient(configuration=config)
             self.api_client = EventsApi(api_client=api_client_instance)
         else:

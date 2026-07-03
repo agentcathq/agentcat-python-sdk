@@ -8,7 +8,7 @@ from mcpcat.types import MCPCatOptions
 
 
 # Initialize debug_mode from environment variable at module load time
-_env_debug = os.getenv("MCPCAT_DEBUG_MODE")
+_env_debug = os.getenv("AGENTCAT_DEBUG_MODE")
 if _env_debug is not None:
     debug_mode = _env_debug.lower() in ("true", "1", "yes", "on")
 else:

@@ -100,7 +100,7 @@ def _env_diagnostics_flag() -> str:
       opt-in that overrides the test-environment auto-disable.
     - ``"disabled"``: anything else disables diagnostics.
 
-    Mirrors the ``MCPCAT_DEBUG_MODE`` idiom in logging.py.
+    Mirrors the ``AGENTCAT_DEBUG_MODE`` idiom in logging.py.
     """
     try:
         raw = os.environ.get("DISABLE_DIAGNOSTICS")
