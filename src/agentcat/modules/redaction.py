@@ -3,7 +3,7 @@
 from typing import Any, TYPE_CHECKING, Callable, Set
 
 if TYPE_CHECKING:
-    from mcpcat.types import Event, UnredactedEvent
+    from agentcat.types import Event, UnredactedEvent
 
 
 # Set of field names that should be protected from redaction.

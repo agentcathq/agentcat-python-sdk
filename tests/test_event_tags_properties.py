@@ -6,16 +6,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.constants import AGENTCAT_SOURCE
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.internal import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.constants import AGENTCAT_SOURCE
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.internal import (
     attach_event_metadata,
     resolve_event_properties,
     resolve_event_tags,
 )
-from mcpcat.modules.redaction import redact_event
-from mcpcat.types import EventType, AgentCatData, SessionInfo, UnredactedEvent
+from agentcat.modules.redaction import redact_event
+from agentcat.types import EventType, AgentCatData, SessionInfo, UnredactedEvent
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -180,7 +180,7 @@ class TestFastMCPIntegration:
 
     @pytest.fixture(autouse=True)
     def restore_queue(self):
-        from mcpcat.modules.event_queue import event_queue as original
+        from agentcat.modules.event_queue import event_queue as original
         yield
         set_event_queue(original)
 
@@ -276,7 +276,7 @@ class TestDatadogExporter:
         return event
 
     def test_source_and_customer_tags_added_to_ddtags(self):
-        from mcpcat.modules.exporters.datadog import DatadogExporter
+        from agentcat.modules.exporters.datadog import DatadogExporter
 
         exporter = DatadogExporter(
             {"type": "datadog", "api_key": "k", "site": "datadoghq.com", "service": "svc", "env": "prod"}
@@ -297,7 +297,7 @@ class TestDatadogExporter:
 
 class TestOTLPExporter:
     def test_source_and_customer_tags_and_properties(self):
-        from mcpcat.modules.exporters.otlp import OTLPExporter
+        from agentcat.modules.exporters.otlp import OTLPExporter
 
         exporter = OTLPExporter({"type": "otlp"})
         event = UnredactedEvent(
@@ -315,7 +315,7 @@ class TestOTLPExporter:
 
 class TestSentryExporter:
     def test_source_and_customer_tags_namespaced_and_properties_in_context(self):
-        from mcpcat.modules.exporters.sentry import SentryExporter
+        from agentcat.modules.exporters.sentry import SentryExporter
 
         exporter = SentryExporter(
             {

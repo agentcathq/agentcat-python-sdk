@@ -2,7 +2,7 @@
 
 import pytest
 from typing import Any, Dict
-from mcpcat.modules.redaction import (
+from agentcat.modules.redaction import (
     redact_strings_in_object,
     redact_event,
     PROTECTED_FIELDS,

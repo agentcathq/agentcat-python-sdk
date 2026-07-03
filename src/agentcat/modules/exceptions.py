@@ -9,8 +9,8 @@ import traceback
 import types
 from typing import Any
 
-from mcpcat.types import ChainedErrorData, ErrorData, StackFrame
-from mcpcat.modules.constants import MAX_EXCEPTION_CHAIN_DEPTH, MAX_STACK_FRAMES
+from agentcat.types import ChainedErrorData, ErrorData, StackFrame
+from agentcat.modules.constants import MAX_EXCEPTION_CHAIN_DEPTH, MAX_STACK_FRAMES
 
 _captured_error: contextvars.ContextVar[BaseException | None] = contextvars.ContextVar(
     "_captured_error", default=None

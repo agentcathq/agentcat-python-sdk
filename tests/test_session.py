@@ -7,16 +7,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from freezegun import freeze_time
 
-from mcpcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
-from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
-from mcpcat.modules.session import (
+from agentcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
+from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
+from agentcat.modules.session import (
     get_agentcat_version,
     get_server_session_id,
     get_session_info,
     new_session_id,
     set_last_activity,
 )
-from mcpcat.types import AgentCatData, AgentCatOptions, SessionInfo
+from agentcat.types import AgentCatData, AgentCatOptions, SessionInfo
 
 from .test_utils.todo_server import create_todo_server
 
@@ -52,7 +52,7 @@ class TestGetAgentcatVersion:
         """Test that get_agentcat_version returns the correct version."""
         mock_version.return_value = "1.2.3"
         assert get_agentcat_version() == "1.2.3"
-        mock_version.assert_called_once_with("mcpcat")
+        mock_version.assert_called_once_with("agentcat")
 
     @patch("importlib.metadata.version")
     def test_returns_none_on_exception(self, mock_version):
@@ -68,8 +68,8 @@ class TestGetSessionInfo:
         """Set up test fixtures."""
         self.server = create_todo_server()
 
-    def test_without_mcpcat_data(self):
-        """Test get_session_info without MCPCat data."""
+    def test_without_agentcat_data(self):
+        """Test get_session_info without AgentCat data."""
         session_info = get_session_info(self.server, None)
 
         assert session_info.ip_address is None
@@ -88,8 +88,8 @@ class TestGetSessionInfo:
         assert session_info.identify_actor_name is None
         assert session_info.identify_data is None
 
-    def test_with_mcpcat_data_no_actor(self):
-        """Test get_session_info with MCPCat data but no identified actor."""
+    def test_with_agentcat_data_no_actor(self):
+        """Test get_session_info with AgentCat data but no identified actor."""
         data = AgentCatData(
             project_id="test_project",
             session_id="test_session",

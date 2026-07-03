@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mcpcat.types import UnredactedEvent
+    from agentcat.types import UnredactedEvent
 
 from .logging import write_to_log
 

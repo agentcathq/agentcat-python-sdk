@@ -2,7 +2,7 @@
 
 from typing import Any, TYPE_CHECKING
 from mcp.types import CallToolResult, TextContent
-from mcpcat.modules.version_detection import has_fastmcp_support
+from agentcat.modules.version_detection import has_fastmcp_support
 
 from .logging import write_to_log
 

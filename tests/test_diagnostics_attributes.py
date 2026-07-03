@@ -2,8 +2,8 @@
 
 import pytest
 
-from mcpcat.modules import diagnostics
-from mcpcat.modules.constants import DIAGNOSTICS_SCOPE_NAME
+from agentcat.modules import diagnostics
+from agentcat.modules.constants import DIAGNOSTICS_SCOPE_NAME
 
 
 @pytest.fixture(autouse=True)

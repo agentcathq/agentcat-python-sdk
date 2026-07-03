@@ -5,8 +5,8 @@ import pytest
 from unittest.mock import MagicMock
 import time
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -317,7 +317,7 @@ class TestMultipleServers:
 
         # Custom identify for server1
         def identify1(request, server):
-            from mcpcat.types import UserIdentity
+            from agentcat.types import UserIdentity
 
             if hasattr(request, "params") and hasattr(request.params, "arguments"):
                 args = request.params.arguments
@@ -331,7 +331,7 @@ class TestMultipleServers:
 
         # Different custom identify for server2
         def identify2(request, server):
-            from mcpcat.types import UserIdentity
+            from agentcat.types import UserIdentity
 
             if hasattr(request, "params") and hasattr(request.params, "arguments"):
                 args = request.params.arguments
@@ -383,6 +383,6 @@ def cleanup_event_queue():
     """Reset event queue after each test."""
     yield
     # Reset to default event queue
-    from mcpcat.modules.event_queue import EventQueue, set_event_queue
+    from agentcat.modules.event_queue import EventQueue, set_event_queue
 
     set_event_queue(EventQueue())

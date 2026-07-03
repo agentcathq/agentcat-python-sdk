@@ -2,8 +2,8 @@
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
+from agentcat import AgentCatOptions, track
+from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -250,7 +250,7 @@ class TestCommunityToolContext:
 
     @pytest.mark.asyncio
     async def test_tool_with_existing_context_parameter(self):
-        """Test that existing context parameter is overwritten with MCPCat's version."""
+        """Test that existing context parameter is overwritten with AgentCat's version."""
         if not HAS_COMMUNITY_FASTMCP:
             pytest.skip("Community FastMCP not available")
 
@@ -273,7 +273,7 @@ class TestCommunityToolContext:
             # Verify context exists
             assert "context" in tool.inputSchema["properties"]
 
-            # Check if it has MCPCat's description
+            # Check if it has AgentCat's description
             context_schema = tool.inputSchema["properties"]["context"]
             assert (
                 context_schema.get("description")

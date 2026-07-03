@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcpcat.modules import diagnostics
-from mcpcat.modules.logging import write_to_log
+from agentcat.modules import diagnostics
+from agentcat.modules.logging import write_to_log
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +21,7 @@ def test_end_to_end_buffers_and_posts():
     diagnostics.init_diagnostics("proj_int")
     write_to_log("AgentCat setup started | project proj_int | server lowlevel")
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
 
         mock_post.assert_called_once()
@@ -34,6 +34,6 @@ def test_disabled_never_posts():
     diagnostics.init_diagnostics("proj_int", disabled=True)
     write_to_log("nothing should buffer")
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
         mock_post.assert_not_called()

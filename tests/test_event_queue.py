@@ -7,9 +7,9 @@ import time
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
-from mcpcat.modules.event_queue import EventQueue, publish_event
-from mcpcat.modules.logging import write_to_log
-from mcpcat.types import Event, AgentCatData, AgentCatOptions, SessionInfo, UnredactedEvent
+from agentcat.modules.event_queue import EventQueue, publish_event
+from agentcat.modules.logging import write_to_log
+from agentcat.types import Event, AgentCatData, AgentCatOptions, SessionInfo, UnredactedEvent
 
 
 class TestEventQueue:
@@ -57,7 +57,7 @@ class TestEventQueue:
             timestamp=datetime.now(timezone.utc),
         )
 
-        with patch("mcpcat.modules.event_queue.write_to_log") as mock_log:
+        with patch("agentcat.modules.event_queue.write_to_log") as mock_log:
             eq.add(event)
             assert mock_log.called
             assert any(
@@ -97,7 +97,7 @@ class TestEventQueue:
         eq.queue.put_nowait(event1)
         eq.queue.put_nowait(event2)
 
-        with patch("mcpcat.modules.event_queue.write_to_log") as mock_log:
+        with patch("agentcat.modules.event_queue.write_to_log") as mock_log:
             eq.add(event3)
             assert mock_log.called
             assert any(
@@ -133,7 +133,7 @@ class TestEventQueue:
 
         eq.queue.put_nowait(event1)
 
-        with patch("mcpcat.modules.event_queue.write_to_log") as mock_log:
+        with patch("agentcat.modules.event_queue.write_to_log") as mock_log:
             eq.add(event2)
 
         # Event2 should not have been added
@@ -146,7 +146,7 @@ class TestEventQueue:
         assert "event-2" in log_message
         assert "mcp:tools/call" in log_message
 
-    @patch("mcpcat.modules.event_queue.redact_event")
+    @patch("agentcat.modules.event_queue.redact_event")
     def test_process_event_with_redaction(self, mock_redact):
         """Test processing event with redaction function."""
         eq = EventQueue()
@@ -189,8 +189,8 @@ class TestEventQueue:
             assert called_event.redaction_fn is None
             mock_send.assert_called_once()
 
-    @patch("mcpcat.modules.event_queue.redact_event")
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.redact_event")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_process_event_redaction_failure(self, mock_log, mock_redact):
         """Test processing event when redaction fails."""
         eq = EventQueue()
@@ -217,7 +217,7 @@ class TestEventQueue:
             assert "test-id" in log_message
             mock_send.assert_not_called()
 
-    @patch("mcpcat.modules.event_queue.generate_prefixed_ksuid")
+    @patch("agentcat.modules.event_queue.generate_prefixed_ksuid")
     def test_process_event_without_id(self, mock_ksuid):
         """Test processing event without ID generates one."""
         eq = EventQueue()
@@ -240,7 +240,7 @@ class TestEventQueue:
             assert sent_event.id == generated_id
             mock_send.assert_called_once()
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_success(self, mock_log):
         """Test sending event successfully."""
         eq = EventQueue()
@@ -264,7 +264,7 @@ class TestEventQueue:
         )
         assert mock_log.call_count >= 1  # At least one success log
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_success_logs_session_not_payload(self, mock_log):
         """Success log carries session metadata, never a serialized payload."""
         eq = EventQueue()
@@ -288,7 +288,7 @@ class TestEventQueue:
         assert "Event details" not in logged
         assert "model_dump_json" not in logged
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_with_retries(self, mock_log):
         """Test sending event with retries on failure."""
         eq = EventQueue()
@@ -321,7 +321,7 @@ class TestEventQueue:
         wait_calls = [call[1]["timeout"] for call in eq._shutdown_event.wait.call_args_list]
         assert wait_calls[0] < wait_calls[1]  # Exponential backoff
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_max_retries_exceeded(self, mock_log):
         """Test sending event when max retries exceeded."""
         eq = EventQueue()
@@ -350,7 +350,7 @@ class TestEventQueue:
         # Check that failure was logged
         assert any("retries" in str(call).lower() for call in mock_log.call_args_list)
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_aborts_retry_on_shutdown(self, mock_log):
         """Test that retry is aborted when shutdown is signaled during backoff wait."""
         eq = EventQueue()
@@ -380,7 +380,7 @@ class TestEventQueue:
         # Log should mention shutdown
         assert any("shutdown" in str(call).lower() for call in mock_log.call_args_list)
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_send_event_early_return_on_shutdown_detected(self, mock_log):
         """Test that no retry is attempted when shutdown is already set at exception handler entry."""
         eq = EventQueue()
@@ -460,7 +460,7 @@ class TestEventQueue:
 
     @patch("time.time")
     @patch("time.sleep")
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_destroy_with_timeout(self, mock_log, mock_sleep, mock_time):
         """Test destroy with events still in queue after timeout."""
         eq = EventQueue()
@@ -519,7 +519,7 @@ class TestEventQueue:
         # Verify event was picked up by worker
         assert eq.queue.qsize() == 0
 
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_worker_thread_exception_handling(self, mock_log):
         """Test worker thread handles exceptions gracefully."""
         eq = EventQueue()
@@ -555,10 +555,10 @@ class TestEventQueue:
 class TestPublishEvent:
     """Test publish_event function."""
 
-    @patch("mcpcat.modules.event_queue.get_server_tracking_data")
-    @patch("mcpcat.modules.event_queue.get_session_info")
-    @patch("mcpcat.modules.event_queue.set_last_activity")
-    @patch("mcpcat.modules.event_queue.event_queue")
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.get_session_info")
+    @patch("agentcat.modules.event_queue.set_last_activity")
+    @patch("agentcat.modules.event_queue.event_queue")
     def test_publish_event_success(
         self, mock_eq, mock_set_activity, mock_session, mock_tracking
     ):
@@ -601,8 +601,8 @@ class TestPublishEvent:
         assert added_event.event_type == "mcp:tools/call"
         assert added_event.session_id is not None
 
-    @patch("mcpcat.modules.event_queue.get_server_tracking_data")
-    @patch("mcpcat.modules.event_queue.write_to_log")
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.write_to_log")
     def test_publish_event_no_tracking_data(self, mock_log, mock_tracking):
         """Test publishing event when no tracking data available."""
         mock_server = MagicMock()
@@ -621,10 +621,10 @@ class TestPublishEvent:
             "tracking data" in str(call).lower() for call in mock_log.call_args_list
         )
 
-    @patch("mcpcat.modules.event_queue.get_server_tracking_data")
-    @patch("mcpcat.modules.event_queue.get_session_info")
-    @patch("mcpcat.modules.event_queue.set_last_activity")
-    @patch("mcpcat.modules.event_queue.event_queue")
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.get_session_info")
+    @patch("agentcat.modules.event_queue.set_last_activity")
+    @patch("agentcat.modules.event_queue.event_queue")
     def test_publish_event_calculates_duration(
         self, mock_eq, mock_set_activity, mock_session, mock_tracking
     ):
@@ -649,7 +649,7 @@ class TestPublishEvent:
         )
 
         # Mock current time to be 1 second later
-        with patch("mcpcat.modules.event_queue.datetime") as mock_datetime:
+        with patch("agentcat.modules.event_queue.datetime") as mock_datetime:
             mock_datetime.now.return_value.timestamp.return_value = (
                 event_timestamp.timestamp() + 1
             )
@@ -660,10 +660,10 @@ class TestPublishEvent:
             assert event.duration is not None
             assert event.duration > 0
 
-    @patch("mcpcat.modules.event_queue.get_server_tracking_data")
-    @patch("mcpcat.modules.event_queue.get_session_info")
-    @patch("mcpcat.modules.event_queue.set_last_activity")
-    @patch("mcpcat.modules.event_queue.event_queue")
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.get_session_info")
+    @patch("agentcat.modules.event_queue.set_last_activity")
+    @patch("agentcat.modules.event_queue.event_queue")
     def test_publish_event_no_duration_no_timestamp(
         self, mock_eq, mock_set_activity, mock_session, mock_tracking
     ):
@@ -687,10 +687,10 @@ class TestPublishEvent:
         # Check duration is None
         assert event.duration is None
 
-    @patch("mcpcat.modules.event_queue.get_server_tracking_data")
-    @patch("mcpcat.modules.event_queue.get_session_info")
-    @patch("mcpcat.modules.event_queue.set_last_activity")
-    @patch("mcpcat.modules.event_queue.event_queue")
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.get_session_info")
+    @patch("agentcat.modules.event_queue.set_last_activity")
+    @patch("agentcat.modules.event_queue.event_queue")
     def test_publish_event_with_redaction_function(
         self, mock_eq, mock_set_activity, mock_session, mock_tracking
     ):
@@ -720,15 +720,15 @@ class TestPublishEvent:
         assert added_event.redaction_fn == mock_redaction_fn
 
 
-@patch("mcpcat.modules.event_queue.signal.signal")
-@patch("mcpcat.modules.event_queue.atexit.register")
+@patch("agentcat.modules.event_queue.signal.signal")
+@patch("agentcat.modules.event_queue.atexit.register")
 def test_shutdown_handlers_registered(mock_atexit, mock_signal):
     """Test that shutdown handlers are registered on module import."""
     # Import the module to trigger registration
     import importlib
-    import mcpcat.modules.event_queue
+    import agentcat.modules.event_queue
 
-    importlib.reload(mcpcat.modules.event_queue)
+    importlib.reload(agentcat.modules.event_queue)
 
     # Check signal handlers registered
     assert mock_signal.call_count >= 2
@@ -742,11 +742,11 @@ def test_shutdown_handlers_registered(mock_atexit, mock_signal):
 
 
 @patch("os._exit")
-@patch("mcpcat.modules.event_queue.signal.signal")
-@patch("mcpcat.modules.event_queue.event_queue")
+@patch("agentcat.modules.event_queue.signal.signal")
+@patch("agentcat.modules.event_queue.event_queue")
 def test_shutdown_handler_function(mock_event_queue, mock_signal, mock_exit):
     """Test the _shutdown_handler function."""
-    from mcpcat.modules.event_queue import _shutdown_handler
+    from agentcat.modules.event_queue import _shutdown_handler
 
     # Call the shutdown handler with proper signal handler arguments
     _shutdown_handler(signal.SIGINT, None)

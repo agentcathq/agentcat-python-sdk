@@ -10,11 +10,11 @@ import time
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules import diagnostics
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.logging import set_diagnostics_sink
-from mcpcat.types import UserIdentity
+from agentcat import AgentCatOptions, track
+from agentcat.modules import diagnostics
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.logging import set_diagnostics_sink
+from agentcat.types import UserIdentity
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server

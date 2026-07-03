@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 import time
 
-from mcpcat import AgentCatOptions, track
+from agentcat import AgentCatOptions, track
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -246,7 +246,7 @@ class TestReportMissing:
     @pytest.mark.asyncio
     async def test_report_missing_publishes_event(self):
         """Verify that calling report_missing tool publishes an event to the queue."""
-        from mcpcat.modules.event_queue import EventQueue, set_event_queue
+        from agentcat.modules.event_queue import EventQueue, set_event_queue
 
         # Create a mock API client
         mock_api_client = MagicMock()
@@ -307,14 +307,14 @@ class TestReportMissing:
 
         finally:
             # Clean up: restore original event queue
-            from mcpcat.modules.event_queue import EventQueue, set_event_queue
+            from agentcat.modules.event_queue import EventQueue, set_event_queue
 
             set_event_queue(EventQueue())
 
     @pytest.mark.asyncio
     async def test_multiple_tool_calls_publish_multiple_events(self):
         """Verify that multiple tool calls result in multiple events being published."""
-        from mcpcat.modules.event_queue import EventQueue, set_event_queue
+        from agentcat.modules.event_queue import EventQueue, set_event_queue
 
         # Create a mock API client
         mock_api_client = MagicMock()
@@ -396,6 +396,6 @@ class TestReportMissing:
 
         finally:
             # Clean up: restore original event queue
-            from mcpcat.modules.event_queue import EventQueue, set_event_queue
+            from agentcat.modules.event_queue import EventQueue, set_event_queue
 
             set_event_queue(EventQueue())

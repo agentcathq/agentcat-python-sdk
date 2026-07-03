@@ -10,18 +10,18 @@ from typing import Any
 from mcp.types import CallToolRequest
 from mcp import ServerResult
 
-from mcpcat.modules import event_queue
-from mcpcat.modules.compatibility import is_mcp_error_response
-from mcpcat.modules.exceptions import capture_exception
-from mcpcat.modules.identify import identify_session
-from mcpcat.modules.internal import attach_event_metadata, get_server_tracking_data
-from mcpcat.modules.logging import write_to_log
-from mcpcat.modules.request_extra import params_with_extra
-from mcpcat.modules.session import (
+from agentcat.modules import event_queue
+from agentcat.modules.compatibility import is_mcp_error_response
+from agentcat.modules.exceptions import capture_exception
+from agentcat.modules.identify import identify_session
+from agentcat.modules.internal import attach_event_metadata, get_server_tracking_data
+from agentcat.modules.logging import write_to_log
+from agentcat.modules.request_extra import params_with_extra
+from agentcat.modules.session import (
     get_client_info_from_request_context,
     get_server_session_id,
 )
-from mcpcat.types import EventType, UnredactedEvent
+from agentcat.types import EventType, UnredactedEvent
 
 from ..mcp_server import override_lowlevel_mcp_server_minimal, safe_request_context
 

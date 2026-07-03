@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.request_extra import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.request_extra import (
     extract_request_extra,
     params_with_extra,
 )
@@ -250,7 +250,7 @@ class TestExtraOnPublishedEvents:
 
     @pytest.fixture(autouse=True)
     def restore_queue(self):
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
         yield
         set_event_queue(original_queue)
 
@@ -310,8 +310,8 @@ class TestExtraOnPublishedEvents:
             meta={"progressToken": "tok-7"},
         )
 
-        from mcpcat.modules.overrides import mcp_server as mcp_server_mod
-        from mcpcat.modules.overrides.official import monkey_patch as official_mp
+        from agentcat.modules.overrides import mcp_server as mcp_server_mod
+        from agentcat.modules.overrides.official import monkey_patch as official_mp
 
         monkeypatch.setattr(
             mcp_server_mod, "safe_request_context", lambda _server: fake_ctx
@@ -361,7 +361,7 @@ class TestExtraOnPublishedEvents:
             headers={"x-list-header": "list-value"},
             request_id="req-list",
         )
-        from mcpcat.modules.overrides import mcp_server as mcp_server_mod
+        from agentcat.modules.overrides import mcp_server as mcp_server_mod
 
         monkeypatch.setattr(
             mcp_server_mod, "safe_request_context", lambda _server: fake_ctx

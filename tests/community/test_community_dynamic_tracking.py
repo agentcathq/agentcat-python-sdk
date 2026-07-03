@@ -3,13 +3,13 @@
 
 import pytest
 
-from mcpcat import track
-from mcpcat.modules.internal import (
+from agentcat import track
+from agentcat.modules.internal import (
     get_server_tracking_data,
     get_tool_timeline,
     reset_all_tracking_data,
 )
-from mcpcat.types import AgentCatOptions
+from agentcat.types import AgentCatOptions
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (

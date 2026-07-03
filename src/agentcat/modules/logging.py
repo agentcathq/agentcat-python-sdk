@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from mcpcat.types import AgentCatOptions
+from agentcat.types import AgentCatOptions
 
 
 # Initialize debug_mode from environment variable at module load time

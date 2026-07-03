@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Set, TypedDict, Literal, Union, NotRequi
 from agentcat_api import PublishEventRequest
 from pydantic import BaseModel
 
-from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
+from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 
 # Type alias for identify function
 IdentifyFunction = Callable[[dict[str, Any], Any], Optional["UserIdentity"]]

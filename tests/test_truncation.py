@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.truncation import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.truncation import (
     _truncate_value,
     truncate_event,
     MAX_STRING_BYTES,
@@ -17,7 +17,7 @@ from mcpcat.modules.truncation import (
     MIN_DEPTH,
     TRUNCATABLE_FIELDS,
 )
-from mcpcat.types import UnredactedEvent
+from agentcat.types import UnredactedEvent
 
 
 def _make_event(**overrides) -> UnredactedEvent:
@@ -272,7 +272,7 @@ class TestTruncateEventErrorHandling:
         big = "x" * 200_000
         event = _make_event(parameters={"data": big})
         with patch(
-            "mcpcat.modules.truncation._truncate_value",
+            "agentcat.modules.truncation._truncate_value",
             side_effect=RuntimeError("boom"),
         ):
             result = truncate_event(event)
@@ -286,7 +286,7 @@ class TestPipelineIntegration:
     def test_truncation_is_imported_in_event_queue(self):
         """Verify truncate_event is used in event_queue module."""
         import inspect
-        from mcpcat.modules.event_queue import EventQueue
+        from agentcat.modules.event_queue import EventQueue
         source = inspect.getsource(EventQueue._process_event)
         assert "truncate_event" in source
 
@@ -296,7 +296,7 @@ class TestTruncationWithTodoServer:
 
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
         yield
         set_event_queue(original_queue)
 

@@ -3,7 +3,7 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from mcpcat.types import AgentCatOptions
+from agentcat.types import AgentCatOptions
 
 
 class TestAgentCatOptionsApiBaseUrl:
@@ -23,14 +23,14 @@ class TestAgentCatOptionsApiBaseUrl:
 class TestEventQueueConfigure:
     """Test EventQueue.configure() method."""
 
-    @patch("mcpcat.modules.event_queue.EventsApi")
-    @patch("mcpcat.modules.event_queue.ApiClient")
-    @patch("mcpcat.modules.event_queue.Configuration")
+    @patch("agentcat.modules.event_queue.EventsApi")
+    @patch("agentcat.modules.event_queue.ApiClient")
+    @patch("agentcat.modules.event_queue.Configuration")
     def test_configure_changes_api_base_url(
         self, mock_configuration, mock_api_client, mock_events_api
     ):
         """configure() should recreate the API client with the new base URL."""
-        from mcpcat.modules.event_queue import EventQueue
+        from agentcat.modules.event_queue import EventQueue
 
         eq = EventQueue(api_client=MagicMock())
         eq.configure("https://custom.example.com")
@@ -44,15 +44,15 @@ class TestEventQueueConfigure:
         )
         assert eq.api_client == mock_events_api.return_value
 
-    @patch("mcpcat.modules.event_queue.EventsApi")
-    @patch("mcpcat.modules.event_queue.ApiClient")
-    @patch("mcpcat.modules.event_queue.Configuration")
+    @patch("agentcat.modules.event_queue.EventsApi")
+    @patch("agentcat.modules.event_queue.ApiClient")
+    @patch("agentcat.modules.event_queue.Configuration")
     def test_default_url_used_when_not_configured(
         self, mock_configuration, mock_api_client, mock_events_api
     ):
         """EventQueue() should use AGENTCAT_API_URL by default."""
-        from mcpcat.modules.constants import AGENTCAT_API_URL
-        from mcpcat.modules.event_queue import EventQueue
+        from agentcat.modules.constants import AGENTCAT_API_URL
+        from agentcat.modules.event_queue import EventQueue
 
         eq = EventQueue()
 
@@ -65,41 +65,41 @@ class TestTrackApiBaseUrl:
 
     # Common patches needed to isolate track() from real MCP server logic
     TRACK_PATCHES = [
-        "mcpcat.is_community_fastmcp_v3",
-        "mcpcat.is_community_fastmcp_v2",
-        "mcpcat.is_official_fastmcp_server",
-        "mcpcat.is_compatible_server",
-        "mcpcat._apply_server_tracking",
-        "mcpcat.get_session_info",
-        "mcpcat.set_server_tracking_data",
+        "agentcat.is_community_fastmcp_v3",
+        "agentcat.is_community_fastmcp_v2",
+        "agentcat.is_official_fastmcp_server",
+        "agentcat.is_compatible_server",
+        "agentcat._apply_server_tracking",
+        "agentcat.get_session_info",
+        "agentcat.set_server_tracking_data",
     ]
 
     def _call_track_with_patches(self, options, env_vars=None):
         """Helper to call track() with all internals mocked, returning a mock event_queue."""
-        from mcpcat import track
+        from agentcat import track
 
         mock_eq = MagicMock()
         patches = {}
         for p in self.TRACK_PATCHES:
             patches[p] = patch(p)
 
-        eq_patch = patch("mcpcat.modules.event_queue.event_queue", mock_eq)
+        eq_patch = patch("agentcat.modules.event_queue.event_queue", mock_eq)
 
         started = []
         try:
             for name, p in patches.items():
                 m = p.start()
                 started.append(p)
-                if name == "mcpcat.is_compatible_server":
+                if name == "agentcat.is_compatible_server":
                     m.return_value = True
                 elif name in (
-                    "mcpcat.is_community_fastmcp_v3",
-                    "mcpcat.is_community_fastmcp_v2",
-                    "mcpcat.is_official_fastmcp_server",
+                    "agentcat.is_community_fastmcp_v3",
+                    "agentcat.is_community_fastmcp_v2",
+                    "agentcat.is_official_fastmcp_server",
                 ):
                     m.return_value = False
-                elif name == "mcpcat.get_session_info":
-                    from mcpcat.types import SessionInfo
+                elif name == "agentcat.get_session_info":
+                    from agentcat.types import SessionInfo
                     m.return_value = SessionInfo()
 
             eq_patch.start()

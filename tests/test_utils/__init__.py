@@ -1,4 +1,4 @@
-"""Test utilities for MCPCat tests."""
+"""Test utilities for AgentCat tests."""
 
 import os
 from pathlib import Path

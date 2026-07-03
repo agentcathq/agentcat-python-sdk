@@ -1,6 +1,6 @@
 """Tests for OTLP record construction + severity inference."""
 
-from mcpcat.modules import diagnostics
+from agentcat.modules import diagnostics
 
 
 def test_warning_failed_is_error():

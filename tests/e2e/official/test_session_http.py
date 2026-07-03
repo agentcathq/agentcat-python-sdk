@@ -3,7 +3,7 @@
 NOTE: User-Agent / X-MCP-Client-Name header parsing is *not* tested e2e
 because real MCP clients always populate session.client_params.clientInfo
 during initialize, and that path wins over header parsing in the SDK
-(see src/mcpcat/modules/session.py::get_client_info_from_request_context).
+(see src/agentcat/modules/session.py::get_client_info_from_request_context).
 The header-fallback path is covered by unit tests in tests/test_stateless.py
 that mock ctx.session = None to force the fallback. e2e here verifies the
 real-world path: clientInfo from the SDK propagates to events.
@@ -21,10 +21,10 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Implementation
 
-from mcpcat import AgentCatOptions
+from agentcat import AgentCatOptions
 
 
-def MCPCAT_OPTIONS_FACTORY() -> AgentCatOptions:
+def AGENTCAT_OPTIONS_FACTORY() -> AgentCatOptions:
     return AgentCatOptions(enable_tracing=True, stateless=True)
 
 

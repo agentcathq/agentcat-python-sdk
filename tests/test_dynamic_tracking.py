@@ -9,9 +9,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server import Server
 from mcp import Tool
 
-from mcpcat import track
-from mcpcat.types import AgentCatOptions
-from mcpcat.modules.internal import (
+from agentcat import track
+from agentcat.types import AgentCatOptions
+from agentcat.modules.internal import (
     get_server_tracking_data,
     reset_all_tracking_data,
     get_tool_timeline,

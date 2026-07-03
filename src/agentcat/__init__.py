@@ -6,10 +6,10 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from typing import Any
 
-__version__ = version("mcpcat")
+__version__ = version("agentcat")
 
-from mcpcat.modules.overrides.mcp_server import override_lowlevel_mcp_server
-from mcpcat.modules.session import get_session_info, new_session_id
+from agentcat.modules.overrides.mcp_server import override_lowlevel_mcp_server
+from agentcat.modules.session import get_session_info, new_session_id
 
 from .modules.compatibility import (
     COMPATIBILITY_ERROR_MESSAGE,
@@ -133,8 +133,8 @@ def track(
         )
 
         if options.exporters:
-            from mcpcat.modules.event_queue import set_telemetry_manager
-            from mcpcat.modules.telemetry import TelemetryManager
+            from agentcat.modules.event_queue import set_telemetry_manager
+            from agentcat.modules.telemetry import TelemetryManager
 
             telemetry_manager = TelemetryManager(options.exporters)
             set_telemetry_manager(telemetry_manager)
@@ -161,7 +161,7 @@ def track(
             or os.environ.get("MCPCAT_API_URL")
         )
         if api_base_url:
-            from mcpcat.modules.event_queue import event_queue
+            from agentcat.modules.event_queue import event_queue
             event_queue.configure(api_base_url)
 
         if not data.tracker_initialized:
@@ -216,7 +216,7 @@ def _apply_server_tracking(
 ) -> None:
     """Apply the appropriate tracking method based on server type."""
     if is_community_v3:
-        from mcpcat.modules.overrides.community_v3.integration import (
+        from agentcat.modules.overrides.community_v3.integration import (
             apply_community_v3_integration,
         )
 
@@ -226,10 +226,10 @@ def _apply_server_tracking(
         )
 
     elif is_official_fastmcp:
-        from mcpcat.modules.overrides.mcp_server import (
+        from agentcat.modules.overrides.mcp_server import (
             override_lowlevel_mcp_server_minimal,
         )
-        from mcpcat.modules.overrides.official.monkey_patch import (
+        from agentcat.modules.overrides.official.monkey_patch import (
             apply_official_fastmcp_patches,
         )
 
@@ -237,7 +237,7 @@ def _apply_server_tracking(
         override_lowlevel_mcp_server_minimal(lowlevel_server, data)
 
     elif is_community_v2:
-        from mcpcat.modules.overrides.community.monkey_patch import (
+        from agentcat.modules.overrides.community.monkey_patch import (
             patch_community_fastmcp,
         )
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from mcpcat.modules.logging import write_to_log
+from agentcat.modules.logging import write_to_log
 
 
 def _headers_to_dict(request: Any) -> Optional[dict]:

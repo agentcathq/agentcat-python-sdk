@@ -1,1 +1,1 @@
-"""Tests for MCPCat."""
+"""Tests for AgentCat."""

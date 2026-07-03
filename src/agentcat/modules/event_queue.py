@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
 from agentcat_api import ApiClient, Configuration, EventsApi
-from mcpcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
+from agentcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
 
 from ..types import Event, UnredactedEvent
 from ..utils import generate_prefixed_ksuid
@@ -226,7 +226,7 @@ class EventQueue:
         # Flush any buffered SDK diagnostics on the way out. Lazy import to avoid
         # an import cycle; never let diagnostics break shutdown.
         try:
-            from mcpcat.modules.diagnostics import flush_diagnostics
+            from agentcat.modules.diagnostics import flush_diagnostics
 
             flush_diagnostics()
         except Exception:

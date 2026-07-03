@@ -6,10 +6,10 @@ import time
 from datetime import datetime, timezone
 
 from mcp import Implementation
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
-from mcpcat.types import UserIdentity
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
+from agentcat.types import UserIdentity
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -22,7 +22,7 @@ class TestEventCaptureCompleteness:
     def setup_and_teardown(self):
         """Set up and tear down for each test."""
         # Store original event queue
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
 
         yield
         # Restore original event queue after test
@@ -144,7 +144,7 @@ class TestEventCaptureCompleteness:
 
     @pytest.mark.asyncio
     async def test_event_contains_sdk_info(self):
-        """Test that events capture SDK language and MCPCat version."""
+        """Test that events capture SDK language and AgentCat version."""
         mock_api_client = MagicMock()
         captured_events = []
 

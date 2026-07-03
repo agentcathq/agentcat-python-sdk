@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from mcp.shared.context import RequestContext
 from mcp.server import Server
 
-from mcpcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
-from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
-from mcpcat.modules.logging import write_to_log
+from agentcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
+from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
+from agentcat.modules.logging import write_to_log
 
 from ..types import AgentCatData, SessionInfo
 from ..utils import generate_prefixed_ksuid
@@ -25,7 +25,7 @@ def get_agentcat_version() -> str | None:
     try:
         import importlib.metadata
 
-        return importlib.metadata.version("mcpcat")
+        return importlib.metadata.version("agentcat")
     except Exception:
         return None
 

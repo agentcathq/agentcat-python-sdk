@@ -1,8 +1,8 @@
-"""Basic tests for Community FastMCP integration with MCPCat."""
+"""Basic tests for Community FastMCP integration with AgentCat."""
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
+from agentcat import AgentCatOptions, track
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -52,7 +52,7 @@ class TestCommunityFastMCPBasics:
     @pytest.mark.asyncio
     async def test_is_community_fastmcp_server(self):
         """Test is_community_fastmcp_server identifies community FastMCP."""
-        from mcpcat.modules.compatibility import (
+        from agentcat.modules.compatibility import (
             is_community_fastmcp_server,
             is_compatible_server,
             is_official_fastmcp_server,
@@ -70,9 +70,9 @@ class TestCommunityFastMCPBasics:
             "Server should NOT be identified as official FastMCP"
         )
 
-        # Should be compatible with MCPCat
+        # Should be compatible with AgentCat
         assert is_compatible_server(server) is True, (
-            "Server should be compatible with MCPCat"
+            "Server should be compatible with AgentCat"
         )
 
 
@@ -102,12 +102,12 @@ class TestCommunityFastMCPBasics:
             assert "✓" in str(result)  # Completed
 
 
-class TestCommunityFastMCPWithMCPCat:
-    """Test Community FastMCP integration with MCPCat tracking."""
+class TestCommunityFastMCPWithAgentCat:
+    """Test Community FastMCP integration with AgentCat tracking."""
 
     @pytest.mark.asyncio
-    async def test_mcpcat_tracking_basic(self):
-        """Test that MCPCat can track a community FastMCP server."""
+    async def test_agentcat_tracking_basic(self):
+        """Test that AgentCat can track a community FastMCP server."""
         server = create_community_todo_server()
         options = AgentCatOptions(enable_tool_call_context=False)
 
@@ -117,12 +117,12 @@ class TestCommunityFastMCPWithMCPCat:
 
         async with create_community_test_client(server) as client:
             # Test that tracking doesn't break basic functionality
-            result = await client.call_tool("add_todo", {"text": "MCPCat test"})
+            result = await client.call_tool("add_todo", {"text": "AgentCat test"})
             assert "Added todo" in str(result)
 
     @pytest.mark.asyncio
-    async def test_mcpcat_tracking_with_context(self):
-        """Test MCPCat context injection with community FastMCP."""
+    async def test_agentcat_tracking_with_context(self):
+        """Test AgentCat context injection with community FastMCP."""
         server = create_community_todo_server()
         options = AgentCatOptions(enable_tool_call_context=True)
 
@@ -149,7 +149,7 @@ class TestCommunityFastMCPWithMCPCat:
                         f"Tool {tool.name} schema has no properties"
                     )
 
-                    # This assertion will fail, showing that MCPCat's context injection
+                    # This assertion will fail, showing that AgentCat's context injection
                     # doesn't work with community FastMCP
                     assert "context" in schema["properties"], (
                         f"Tool {tool.name} is missing 'context' parameter. "

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcpcat.modules.logging import write_to_log, set_debug_mode
+from agentcat.modules.logging import write_to_log, set_debug_mode
 
 
 class TestLogging:
@@ -64,11 +64,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write a test message
             test_message = f"Test log message {unique_id}"
@@ -93,11 +93,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write a test message
             test_message = f"Test log message {unique_id}"
@@ -120,11 +120,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write a test message
             test_message = f"Test log message {unique_id}"
@@ -140,11 +140,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write multiple messages with unique identifiers
             messages = [
@@ -191,11 +191,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write a test message
             test_message = f"Test with directory creation {unique_id}"
@@ -212,11 +212,11 @@ class TestLogging:
 
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Make the parent directory read-only to cause write failure
             log_file.parent.chmod(0o444)
@@ -238,11 +238,11 @@ class TestLogging:
         
         # Use a unique file name for this test
         unique_id = str(uuid.uuid4())
-        log_file = tmp_path / f"test_mcpcat_{unique_id}.log"
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
 
         # Mock os.path.expanduser to use our temp file
         with patch(
-            "mcpcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
         ):
             # Write a test message
             test_message = f"Test format validation {unique_id}"

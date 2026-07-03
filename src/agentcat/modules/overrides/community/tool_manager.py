@@ -1,7 +1,7 @@
 from typing import Any
 
-from mcpcat.modules.compatibility import is_community_fastmcp_server
-from mcpcat.modules.internal import (
+from agentcat.modules.compatibility import is_community_fastmcp_server
+from agentcat.modules.internal import (
     get_server_tracking_data,
     get_original_method,
     store_original_method,
@@ -9,8 +9,8 @@ from mcpcat.modules.internal import (
     register_tool,
     mark_tool_tracked,
 )
-from mcpcat.modules.logging import write_to_log
-from mcpcat.modules.tools import handle_report_missing
+from agentcat.modules.logging import write_to_log
+from agentcat.modules.tools import handle_report_missing
 
 from fastmcp import FastMCP
 
@@ -81,7 +81,7 @@ def patch_community_fastmcp_tool_manager(server: Any) -> None:
 
             # Force the correct schema - Pydantic's TypeAdapter can mangle
             # the type on async closures into anyOf: [string, null]
-            from mcpcat.modules.tools import GET_MORE_TOOLS_SCHEMA
+            from agentcat.modules.tools import GET_MORE_TOOLS_SCHEMA
             if hasattr(server._tool_manager, "_tools") and "get_more_tools" in server._tool_manager._tools:
                 server._tool_manager._tools["get_more_tools"].parameters = GET_MORE_TOOLS_SCHEMA
 

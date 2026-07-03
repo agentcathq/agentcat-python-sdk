@@ -6,13 +6,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.internal import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.internal import (
     get_server_tracking_data,
     set_server_tracking_data,
 )
-from mcpcat.types import UserIdentity
+from agentcat.types import UserIdentity
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -35,7 +35,7 @@ class TestCommunityEventCapture:
     def setup_and_teardown(self):
         """Set up and tear down for each test."""
         # Store original event queue
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
 
         yield
         # Restore original event queue after test

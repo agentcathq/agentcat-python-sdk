@@ -14,15 +14,15 @@ from typing import Any, Callable, Tuple
 
 import pytest
 
-import mcpcat
-from mcpcat import AgentCatOptions
+import agentcat
+from agentcat import AgentCatOptions
 
 from tests.e2e._helpers import find_free_port, wait_for_port
 
 try:
     from fastmcp import FastMCP
 
-    from mcpcat.modules.compatibility import is_community_fastmcp_v3
+    from agentcat.modules.compatibility import is_community_fastmcp_v3
     HAS_FASTMCP_V3 = True
 except ImportError:
     FastMCP = None  # type: ignore
@@ -59,10 +59,10 @@ def v3_http_server(request) -> Tuple[str, Any]:
         pytest.skip("installed fastmcp is not v3")
 
     options_factory: Callable[[], AgentCatOptions] = getattr(
-        request.module, "MCPCAT_OPTIONS_FACTORY", _default_options_factory
+        request.module, "AGENTCAT_OPTIONS_FACTORY", _default_options_factory
     )
     options = options_factory()
-    mcpcat.track(server, "test_project", options)
+    agentcat.track(server, "test_project", options)
 
     import uvicorn
 

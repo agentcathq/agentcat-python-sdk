@@ -8,9 +8,9 @@ from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat import AgentCatOptions, track
+from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
+from agentcat.modules.event_queue import EventQueue, set_event_queue
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -892,7 +892,7 @@ class TestUserIntentCaptureInEvents:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Set up and tear down mock event queue."""
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
 
         yield
         set_event_queue(original_queue)

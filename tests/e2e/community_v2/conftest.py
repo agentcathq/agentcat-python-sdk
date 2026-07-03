@@ -15,9 +15,9 @@ from typing import Any, Callable, Tuple
 
 import pytest
 
-import mcpcat
-from mcpcat import AgentCatOptions
-from mcpcat.modules.compatibility import (
+import agentcat
+from agentcat import AgentCatOptions
+from agentcat.modules.compatibility import (
     is_community_fastmcp_v2,
     is_community_fastmcp_v3,
 )
@@ -63,10 +63,10 @@ def v2_http_server(request) -> Tuple[str, Any]:
         pytest.skip("server is not detected as community FastMCP v2")
 
     options_factory: Callable[[], AgentCatOptions] = getattr(
-        request.module, "MCPCAT_OPTIONS_FACTORY", _default_options_factory
+        request.module, "AGENTCAT_OPTIONS_FACTORY", _default_options_factory
     )
     options = options_factory()
-    mcpcat.track(server, "test_project", options)
+    agentcat.track(server, "test_project", options)
 
     import uvicorn
 

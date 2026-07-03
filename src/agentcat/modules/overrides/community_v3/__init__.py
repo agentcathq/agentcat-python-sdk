@@ -1,9 +1,9 @@
 """Community FastMCP v3 integration using the middleware system."""
 
-from mcpcat.modules.overrides.community_v3.integration import (
+from agentcat.modules.overrides.community_v3.integration import (
     apply_community_v3_integration,
 )
-from mcpcat.modules.overrides.community_v3.middleware import AgentCatMiddleware
+from agentcat.modules.overrides.community_v3.middleware import AgentCatMiddleware
 
 __all__ = [
     "AgentCatMiddleware",

@@ -10,8 +10,8 @@ from typing import Any, Optional
 
 import pytest
 
-from mcpcat.modules.internal import get_server_tracking_data
-from mcpcat.types import UserIdentity
+from agentcat.modules.internal import get_server_tracking_data
+from agentcat.types import UserIdentity
 
 
 pytestmark = pytest.mark.e2e

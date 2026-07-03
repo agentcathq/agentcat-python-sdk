@@ -6,13 +6,13 @@ from mcp.server import Server
 from mcp.types import CallToolRequest, ListToolsRequest, InitializeRequest
 from mcp.shared.context import RequestContext
 
-from mcpcat.modules import event_queue
-from mcpcat.modules.compatibility import is_mcp_error_response
-from mcpcat.modules.identify import identify_session
-from mcpcat.modules.internal import attach_event_metadata
-from mcpcat.modules.logging import write_to_log
-from mcpcat.modules.request_extra import params_with_extra
-from mcpcat.modules.tools import handle_report_missing
+from agentcat.modules import event_queue
+from agentcat.modules.compatibility import is_mcp_error_response
+from agentcat.modules.identify import identify_session
+from agentcat.modules.internal import attach_event_metadata
+from agentcat.modules.logging import write_to_log
+from agentcat.modules.request_extra import params_with_extra
+from agentcat.modules.tools import handle_report_missing
 
 from ...types import EventType, AgentCatData, UnredactedEvent
 from ..session import get_client_info_from_request_context, get_server_session_id

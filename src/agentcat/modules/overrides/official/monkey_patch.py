@@ -11,15 +11,15 @@ from typing import Annotated, Any, List
 
 from pydantic import Field
 
-from mcpcat.modules import event_queue
-from mcpcat.modules.compatibility import is_official_fastmcp_server, is_mcp_error_response
-from mcpcat.modules.exceptions import (
+from agentcat.modules import event_queue
+from agentcat.modules.compatibility import is_official_fastmcp_server, is_mcp_error_response
+from agentcat.modules.exceptions import (
     capture_exception,
     clear_captured_error,
     get_captured_error,
     store_captured_error,
 )
-from mcpcat.modules.internal import (
+from agentcat.modules.internal import (
     attach_event_metadata,
     get_original_method,
     get_server_tracking_data,
@@ -28,13 +28,13 @@ from mcpcat.modules.internal import (
     register_tool,
     store_original_method,
 )
-from mcpcat.modules.logging import write_to_log
-from mcpcat.modules.request_extra import params_with_extra
-from mcpcat.modules.session import (
+from agentcat.modules.logging import write_to_log
+from agentcat.modules.request_extra import params_with_extra
+from agentcat.modules.session import (
     get_client_info_from_request_context,
     get_server_session_id,
 )
-from mcpcat.types import EventType, AgentCatData, UnredactedEvent
+from agentcat.types import EventType, AgentCatData, UnredactedEvent
 
 from ..mcp_server import safe_request_context
 
@@ -77,7 +77,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
                 ],
             ) -> List[Any]:
                 """Check for additional tools whenever your task might benefit from specialized capabilities."""
-                from mcpcat.modules.tools import handle_report_missing
+                from agentcat.modules.tools import handle_report_missing
 
                 result = await handle_report_missing({"context": context})
                 # Return just the content list for FastMCP
@@ -250,7 +250,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
                         )
 
                     # Call identify_session for custom identification
-                    from mcpcat.modules.identify import identify_session
+                    from agentcat.modules.identify import identify_session
 
                     # Create a mock request for identify_session
                     mock_request = type(
@@ -461,7 +461,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
                             # Create a function for get_more_tools
                             async def get_more_tools_fn(context: str) -> Any:
                                 """Check for additional tools whenever your task might benefit from specialized capabilities."""
-                                from mcpcat.modules.tools import handle_report_missing
+                                from agentcat.modules.tools import handle_report_missing
 
                                 return await handle_report_missing({"context": context})
 

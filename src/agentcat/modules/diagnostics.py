@@ -52,7 +52,7 @@ BATCH_FLUSH_MS = 2000
 
 def _sdk_version() -> str:
     try:
-        return version("mcpcat")
+        return version("agentcat")
     except Exception:
         return "unknown"
 

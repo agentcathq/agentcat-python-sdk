@@ -1,6 +1,6 @@
 """Regression: diagnostics must auto-disable inside test environments.
 
-Ports MCPCat/mcpcat-typescript-sdk#44 to Python. A pytest run must never ship
+Ports AgentCat/agentcat-typescript-sdk#44 to Python. A pytest run must never ship
 OTLP diagnostics to the live collector, even when a test calls ``track()`` with
 default options and no ``DISABLE_DIAGNOSTICS`` override. Consumers of the SDK get
 this protection for free; explicit ``DISABLE_DIAGNOSTICS=false`` opts back in.
@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-import mcpcat
-from mcpcat.modules import diagnostics
+import agentcat
+from agentcat.modules import diagnostics
 
 
 @pytest.fixture(autouse=True)
@@ -25,11 +25,11 @@ def test_track_does_not_enable_diagnostics_in_pytest(monkeypatch):
     # Simulate a consumer's test suite: no explicit opt-out in the environment.
     monkeypatch.delenv("DISABLE_DIAGNOSTICS", raising=False)
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         # track() runs init_diagnostics before validating the server, so even
         # the error path would latch diagnostics on without the guard.
         with pytest.raises(TypeError):
-            mcpcat.track(object(), "proj_test_env")
+            agentcat.track(object(), "proj_test_env")
 
         assert diagnostics.is_diagnostics_enabled() is False
         diagnostics.flush_diagnostics()

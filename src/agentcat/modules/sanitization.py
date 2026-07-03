@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mcpcat.types import UnredactedEvent
+    from agentcat.types import UnredactedEvent
 
 # Threshold for base64 scanning — strings shorter than this are passed through.
 _BASE64_SIZE_THRESHOLD = 10_240

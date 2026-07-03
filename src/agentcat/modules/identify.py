@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-from mcpcat.modules import event_queue
-from mcpcat.modules.internal import get_server_tracking_data
-from mcpcat.modules.logging import write_to_log
-from mcpcat.types import EventType, UnredactedEvent, UserIdentity
+from agentcat.modules import event_queue
+from agentcat.modules.internal import get_server_tracking_data
+from agentcat.modules.logging import write_to_log
+from agentcat.types import EventType, UnredactedEvent, UserIdentity
 
 
 def identify_session(server, request: any, context: any) -> UserIdentity | None:

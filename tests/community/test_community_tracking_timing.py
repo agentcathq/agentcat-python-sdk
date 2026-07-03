@@ -2,8 +2,8 @@
 
 import pytest
 
-from mcpcat import AgentCatOptions, track
-from mcpcat.modules.internal import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.internal import (
     get_server_tracking_data,
     reset_all_tracking_data,
 )
