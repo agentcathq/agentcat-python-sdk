@@ -44,8 +44,8 @@ def write_to_log(message: str) -> None:
         except Exception:
             pass
 
-    # Always use ~/mcpcat.log
-    log_path = os.path.expanduser("~/mcpcat.log")
+    # Always use ~/agentcat.log
+    log_path = os.path.expanduser("~/agentcat.log")
 
     try:
         if debug_mode:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-LOG_FILE = "mcpcat.log"
+LOG_FILE = "agentcat.log"
 
 
 def cleanup_log_file():

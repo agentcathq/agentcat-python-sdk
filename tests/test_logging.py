@@ -17,7 +17,7 @@ class TestLogging:
     @pytest.fixture(autouse=True)
     def cleanup_log_file(self):
         """Clean up the log file before and after each test."""
-        log_path = os.path.expanduser("~/mcpcat.log")
+        log_path = os.path.expanduser("~/agentcat.log")
 
         # Clean up before test
         if os.path.exists(log_path):
@@ -28,6 +28,34 @@ class TestLogging:
         # Clean up after test
         if os.path.exists(log_path):
             os.remove(log_path)
+
+    def test_write_to_log_uses_agentcat_log_path(self):
+        """Test that write_to_log writes to ~/agentcat.log (no ~/mcpcat.log fallback)."""
+        # Enable debug mode
+        set_debug_mode(True)
+
+        log_path = os.path.expanduser("~/agentcat.log")
+        old_log_path = os.path.expanduser("~/mcpcat.log")
+        old_path_existed_before = os.path.exists(old_log_path)
+
+        test_message = f"Default path test {uuid.uuid4()}"
+        write_to_log(test_message)
+
+        # The new default path must receive the entry
+        assert os.path.exists(log_path), "~/agentcat.log was not created"
+        assert test_message in Path(log_path).read_text(), (
+            "Log message not found in ~/agentcat.log"
+        )
+
+        # The old path must NOT be written to (no fallback)
+        if not old_path_existed_before:
+            assert not os.path.exists(old_log_path), (
+                "~/mcpcat.log was wrongly created"
+            )
+        else:
+            assert test_message not in Path(old_log_path).read_text(), (
+                "Log message wrongly written to ~/mcpcat.log"
+            )
 
     def test_write_to_log_creates_file(self, tmp_path):
         """Test that write_to_log creates the log file if it doesn't exist."""

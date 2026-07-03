@@ -1,5 +1,5 @@
 INACTIVITY_TIMEOUT_IN_MINUTES = 30
-LOG_PATH = "mcpcat.log"  # Default log file path
+LOG_PATH = "agentcat.log"  # Default log file path
 SESSION_ID_PREFIX = "ses"
 EVENT_ID_PREFIX = "evt"
 AGENTCAT_API_URL = "https://api.agentcat.com"  # Default API URL for AgentCat events
