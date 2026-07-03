@@ -14,7 +14,7 @@ from mcpcat.modules.logging import write_to_log
 from mcpcat.modules.request_extra import params_with_extra
 from mcpcat.modules.tools import handle_report_missing
 
-from ...types import EventType, MCPCatData, UnredactedEvent
+from ...types import EventType, AgentCatData, UnredactedEvent
 from ..session import get_client_info_from_request_context, get_server_session_id
 
 
@@ -28,10 +28,10 @@ def safe_request_context(server: Server) -> Optional[RequestContext]:
     return request_context
 
 
-"""Tool management and interception for MCPCat."""
+"""Tool management and interception for AgentCat."""
 
 
-def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
+def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
     """Set up tool list and call handlers for FastMCP."""
     # Store original request handlers - we only need to intercept at the low-level
     # TODO: original_call_tool_handler = server.request_handlers.get(InitializeRequest)
@@ -40,7 +40,7 @@ def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
     original_list_tools_handler = server.request_handlers.get(ListToolsRequest)
 
     async def wrapped_initialize_handler(request: InitializeRequest) -> ServerResult:
-        """Intercept initialize requests to add MCPCat data to the request context."""
+        """Intercept initialize requests to add AgentCat data to the request context."""
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         identity = identify_session(server, request, request_context)
@@ -78,7 +78,7 @@ def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
         return result
 
     async def wrapped_list_tools_handler(request: ListToolsRequest) -> ServerResult:
-        """Intercept list_tools requests to add MCPCat tools and modify existing ones."""
+        """Intercept list_tools requests to add AgentCat tools and modify existing ones."""
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         client_name, client_version = get_client_info_from_request_context(server, request_context)
@@ -162,7 +162,7 @@ def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
         return result
 
     async def wrapped_call_tool_handler(request: CallToolRequest) -> ServerResult:
-        """Intercept call_tool requests to add MCPCat tracking and handle special tools."""
+        """Intercept call_tool requests to add AgentCat tracking and handle special tools."""
         tool_name = request.params.name
         arguments = request.params.arguments or {}
         session_id = get_server_session_id(server)
@@ -210,7 +210,7 @@ def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
             # Log warning if context is missing and tool is not report_missing
             if event.user_intent is None and tool_name != "get_more_tools":
                 write_to_log(
-                    f"Tool '{tool_name}' called without context. mcpcat.track() might have been called BEFORE tool initialization."
+                    f"Tool '{tool_name}' called without context. agentcat.track() might have been called BEFORE tool initialization."
                 )
 
         # If tracing is enabled, wrap the call with timing and logging
@@ -241,7 +241,7 @@ def override_lowlevel_mcp_server(server: Server, data: MCPCatData) -> None:
     server.request_handlers[InitializeRequest] = wrapped_initialize_handler
 
 
-def override_lowlevel_mcp_server_minimal(server: Server, data: MCPCatData) -> None:
+def override_lowlevel_mcp_server_minimal(server: Server, data: AgentCatData) -> None:
     """Set up minimal handlers for FastMCP servers (non-tool events only).
 
     This is used for FastMCP servers where tool tracking is handled by monkey-patching.
@@ -252,7 +252,7 @@ def override_lowlevel_mcp_server_minimal(server: Server, data: MCPCatData) -> No
     original_list_tools_handler = server.request_handlers.get(ListToolsRequest)
 
     async def wrapped_initialize_handler(request: InitializeRequest) -> ServerResult:
-        """Intercept initialize requests to add MCPCat data to the request context."""
+        """Intercept initialize requests to add AgentCat data to the request context."""
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         try:

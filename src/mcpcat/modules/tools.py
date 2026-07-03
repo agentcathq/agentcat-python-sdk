@@ -1,4 +1,4 @@
-"""Tool management and interception for MCPCat."""
+"""Tool management and interception for AgentCat."""
 
 from typing import Any, TYPE_CHECKING
 from mcp.types import CallToolResult, TextContent

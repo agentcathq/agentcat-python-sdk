@@ -8,7 +8,7 @@ Records carry environment/identity metadata (the attempted ``project_id``, or an
 anonymous install-id hash when none) plus a metadata-only message body. The local
 ``~/agentcat.log`` is unaffected.
 
-On by default; opt out via ``MCPCatOptions(disable_diagnostics=True)`` or the
+On by default; opt out via ``AgentCatOptions(disable_diagnostics=True)`` or the
 ``DISABLE_DIAGNOSTICS`` env var. Auto-disabled in test environments
 (``PYTEST_CURRENT_TEST`` / ``PYTEST_VERSION`` set) unless explicitly force-enabled
 with ``DISABLE_DIAGNOSTICS=false``. Nothing here ever throws into the host, and the

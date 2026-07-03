@@ -12,7 +12,7 @@ MAX_TAG_ENTRIES = 50
 
 
 def validate_tags(tags: dict) -> Optional[dict]:
-    """Validate and filter a tags dict against MCPCat tag constraints.
+    """Validate and filter a tags dict against AgentCat tag constraints.
 
     Invalid entries are dropped with a warning logged via write_to_log.
     Returns None if no valid entries remain.

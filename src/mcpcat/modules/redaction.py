@@ -1,4 +1,4 @@
-"""PII redaction for MCPCat logs."""
+"""PII redaction for AgentCat logs."""
 
 from typing import Any, TYPE_CHECKING, Callable, Set
 

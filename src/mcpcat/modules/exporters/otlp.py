@@ -1,4 +1,4 @@
-"""OpenTelemetry Protocol (OTLP) exporter for MCPCat telemetry."""
+"""OpenTelemetry Protocol (OTLP) exporter for AgentCat telemetry."""
 
 import json
 from datetime import datetime
@@ -14,7 +14,7 @@ from .trace_context import trace_context
 
 
 class OTLPExporter(Exporter):
-    """Exports MCPCat events to OpenTelemetry collectors via OTLP."""
+    """Exports AgentCat events to OpenTelemetry collectors via OTLP."""
 
     def __init__(self, config: OTLPExporterConfig):
         """
@@ -52,7 +52,7 @@ class OTLPExporter(Exporter):
         Export an event to OTLP collector.
 
         Args:
-            event: MCPCat event to export
+            event: AgentCat event to export
         """
         try:
             # Convert event to OTLP span format
@@ -91,10 +91,10 @@ class OTLPExporter(Exporter):
 
     def _convert_to_otlp_span(self, event: Event) -> Dict[str, Any]:
         """
-        Convert MCPCat event to OTLP span format.
+        Convert AgentCat event to OTLP span format.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             OTLP span dictionary
@@ -128,7 +128,7 @@ class OTLPExporter(Exporter):
         Get resource-level attributes for OTLP.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             List of attribute key-value pairs
@@ -168,7 +168,7 @@ class OTLPExporter(Exporter):
         Get span-level attributes for OTLP.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             List of attribute key-value pairs

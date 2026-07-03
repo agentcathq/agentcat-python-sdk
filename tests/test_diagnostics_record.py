@@ -24,7 +24,7 @@ def test_lowercase_warning_is_info():
 
 
 def test_plain_is_info():
-    rec = diagnostics._build_record_for_test("MCPCat setup complete | project x")
+    rec = diagnostics._build_record_for_test("AgentCat setup complete | project x")
     assert rec["severityText"] == "INFO"
     assert rec["severityNumber"] == 9
 

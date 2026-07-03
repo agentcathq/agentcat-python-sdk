@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, call, patch
 
 from mcpcat.modules.event_queue import EventQueue, publish_event
 from mcpcat.modules.logging import write_to_log
-from mcpcat.types import Event, MCPCatData, MCPCatOptions, SessionInfo, UnredactedEvent
+from mcpcat.types import Event, AgentCatData, AgentCatOptions, SessionInfo, UnredactedEvent
 
 
 class TestEventQueue:
@@ -565,12 +565,12 @@ class TestPublishEvent:
         """Test publishing event successfully."""
         # Mock server and data
         mock_server = MagicMock()
-        mock_data = MCPCatData(
+        mock_data = AgentCatData(
             project_id="project-123",
             session_id="session-123",
             session_info=SessionInfo(),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(redact_sensitive_information=None),
+            options=AgentCatOptions(redact_sensitive_information=None),
         )
         mock_tracking.return_value = mock_data
 
@@ -630,12 +630,12 @@ class TestPublishEvent:
     ):
         """Test publishing event calculates duration if not provided."""
         mock_server = MagicMock()
-        mock_data = MCPCatData(
+        mock_data = AgentCatData(
             project_id="project-123",
             session_id="session-123",
             session_info=SessionInfo(),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
         mock_tracking.return_value = mock_data
         mock_session.return_value = SessionInfo()
@@ -669,12 +669,12 @@ class TestPublishEvent:
     ):
         """Test publishing event with no duration and no timestamp sets duration to None."""
         mock_server = MagicMock()
-        mock_data = MCPCatData(
+        mock_data = AgentCatData(
             project_id="project-123",
             session_id="session-123",
             session_info=SessionInfo(),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
         mock_tracking.return_value = mock_data
         mock_session.return_value = SessionInfo()
@@ -697,12 +697,12 @@ class TestPublishEvent:
         """Test publishing event includes redaction function from options."""
         mock_server = MagicMock()
         mock_redaction_fn = MagicMock()
-        mock_data = MCPCatData(
+        mock_data = AgentCatData(
             project_id="project-123",
             session_id="session-123",
             session_info=SessionInfo(),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(redact_sensitive_information=mock_redaction_fn),
+            options=AgentCatOptions(redact_sensitive_information=mock_redaction_fn),
         )
         mock_tracking.return_value = mock_data
         mock_session.return_value = SessionInfo()

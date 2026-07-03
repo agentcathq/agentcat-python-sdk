@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 
 from ..test_utils.community_client import create_community_test_client
@@ -25,7 +25,7 @@ class TestCommunityToolContext:
     async def test_context_parameter_injection_enabled(self):
         """Test that context parameter is added when enable_tool_call_context=True."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -54,7 +54,7 @@ class TestCommunityToolContext:
     async def test_context_parameter_not_injected_when_disabled(self):
         """Test that context parameter is NOT added when enable_tool_call_context=False."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=False)
+        options = AgentCatOptions(enable_tool_call_context=False)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -74,7 +74,7 @@ class TestCommunityToolContext:
     async def test_schema_with_existing_properties(self):
         """Test with tools that have existing inputSchema and properties."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -106,7 +106,7 @@ class TestCommunityToolContext:
             """A tool with no parameters."""
             return "success"
 
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -138,7 +138,7 @@ class TestCommunityToolContext:
             """Tool with empty schema."""
             return "success"
 
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -153,7 +153,7 @@ class TestCommunityToolContext:
     async def test_schema_with_existing_required_fields(self):
         """Test with tools that already have required fields."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -171,7 +171,7 @@ class TestCommunityToolContext:
     async def test_tool_call_with_valid_context(self):
         """Test calling a tool with valid context parameter."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -191,7 +191,7 @@ class TestCommunityToolContext:
     async def test_tool_call_without_context_still_works(self):
         """Test that tool calls without context still work (context is stripped)."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -208,7 +208,7 @@ class TestCommunityToolContext:
     async def test_tool_call_with_empty_context(self):
         """Test calling a tool with empty string context."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -227,7 +227,7 @@ class TestCommunityToolContext:
     async def test_get_more_tools_exclusion_with_context(self):
         """Test that get_more_tools doesn't get context when both features are enabled."""
         server = create_community_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True, enable_tool_call_context=True
         )
         track(server, "test_project", options)
@@ -263,7 +263,7 @@ class TestCommunityToolContext:
             """Tool that already has a context parameter."""
             return f"Original context: {context}, data: {data}"
 
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -287,7 +287,7 @@ class TestCommunityToolContext:
     async def test_original_functionality_preserved(self):
         """Verify that original tool functionality remains intact with context."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -320,7 +320,7 @@ class TestCommunityToolContext:
     async def test_context_not_passed_to_original_handler(self):
         """Verify that context parameter is stripped before passing to original handler."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -345,7 +345,7 @@ class TestCommunityToolContext:
         server = FastMCP("test-server")
 
         # Track with context enabled
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         # Add tool AFTER tracking
@@ -374,7 +374,7 @@ class TestCommunityToolContext:
         """Test that custom context description is correctly applied in community FastMCP."""
         server = create_community_todo_server()
         custom_description = "Explain why you need to use this tool"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_description
         )
@@ -396,7 +396,7 @@ class TestCommunityToolContext:
     async def test_custom_context_description_empty_string(self):
         """Test edge case with empty string custom description in community FastMCP."""
         server = create_community_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=""
         )
@@ -418,7 +418,7 @@ class TestCommunityToolContext:
         """Test custom description with special characters and Unicode in community FastMCP."""
         server = create_community_todo_server()
         special_description = "Why use this? 🚀 Include: 'quotes', \"double\", newlines\n, tabs\t."
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=special_description
         )
@@ -438,7 +438,7 @@ class TestCommunityToolContext:
         server = create_community_todo_server()
         # Create a very long description
         long_description = "This is a very detailed description for the context. " * 50
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=long_description
         )
@@ -458,7 +458,7 @@ class TestCommunityToolContext:
         """Verify the default description is used when not specified in community FastMCP."""
         server = create_community_todo_server()
         # Don't specify custom_context_description, should use default
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -495,7 +495,7 @@ class TestCommunityToolContext:
             return "Tool 3"
 
         custom_desc = "Custom community context for all tools"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_desc
         )
@@ -515,7 +515,7 @@ class TestCommunityToolContext:
         """Test tool calls work correctly with custom context description in community FastMCP."""
         server = create_community_todo_server()
         custom_desc = "Provide reasoning for this action in the community server"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_desc
         )
@@ -551,7 +551,7 @@ class TestCommunityToolContext:
 
         # Track with custom context description
         custom_desc = "Dynamic tool custom context"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_desc
         )

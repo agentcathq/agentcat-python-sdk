@@ -187,7 +187,7 @@ def has_necessary_attributes(server: Any) -> bool:
 
 
 def is_compatible_server(server: Any) -> bool:
-    """Check if the server is compatible with MCPCat."""
+    """Check if the server is compatible with AgentCat."""
     # If it's FastMCP v3 (community), it's compatible
     if is_community_fastmcp_v3(server):
         return True

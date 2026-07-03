@@ -1,1 +1,1 @@
-"""Third-party utilities for MCPCat."""
+"""Third-party utilities for AgentCat."""

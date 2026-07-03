@@ -1,17 +1,17 @@
-"""Internal data storage for MCPCat."""
+"""Internal data storage for AgentCat."""
 
 import inspect
 import weakref
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from ..types import EventType, MCPCatData, ToolRegistration, UnredactedEvent
+from ..types import EventType, AgentCatData, ToolRegistration, UnredactedEvent
 from .compatibility import is_official_fastmcp_server
 from .logging import write_to_log
 from .validation import validate_tags
 
 # WeakKeyDictionary to store data associated with server instances
-_server_data_map: weakref.WeakKeyDictionary[Any, MCPCatData] = (
+_server_data_map: weakref.WeakKeyDictionary[Any, AgentCatData] = (
     weakref.WeakKeyDictionary()
 )
 
@@ -27,14 +27,14 @@ def _get_server_key(server: Any) -> Any:
     return server
 
 
-def set_server_tracking_data(server: Any, data: MCPCatData) -> None:
-    """Store MCPCat data for a server instance."""
+def set_server_tracking_data(server: Any, data: AgentCatData) -> None:
+    """Store AgentCat data for a server instance."""
     key = _get_server_key(server)
     _server_data_map[key] = data
 
 
-def get_server_tracking_data(server: Any) -> MCPCatData | None:
-    """Retrieve MCPCat data for a server instance."""
+def get_server_tracking_data(server: Any) -> AgentCatData | None:
+    """Retrieve AgentCat data for a server instance."""
     key = _get_server_key(server)
     return _server_data_map.get(key, None)
 
@@ -67,7 +67,7 @@ def register_tool(server: Any, name: str) -> None:
 
 
 def mark_tool_tracked(server: Any, name: str) -> None:
-    """Mark a tool as being tracked by MCPCat for this server."""
+    """Mark a tool as being tracked by AgentCat for this server."""
     data = get_server_tracking_data(server)
     if data and name in data.tool_registry:
         data.tool_registry[name].tracked = True
@@ -121,7 +121,7 @@ def get_original_methods() -> Dict[str, Any]:
 
 
 async def resolve_event_tags(
-    data: MCPCatData, request: Any, extra: Any
+    data: AgentCatData, request: Any, extra: Any
 ) -> Optional[Dict[str, str]]:
     """Resolve the event_tags callback and return validated tags.
 
@@ -147,7 +147,7 @@ async def resolve_event_tags(
 
 
 async def resolve_event_properties(
-    data: MCPCatData, request: Any, extra: Any
+    data: AgentCatData, request: Any, extra: Any
 ) -> Optional[Dict[str, Any]]:
     """Resolve the event_properties callback and return the result.
 
@@ -171,7 +171,7 @@ async def resolve_event_properties(
 
 async def attach_event_metadata(
     event: UnredactedEvent,
-    data: Optional[MCPCatData],
+    data: Optional[AgentCatData],
     request: Any,
     extra: Any,
 ) -> None:

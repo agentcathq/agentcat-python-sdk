@@ -1,4 +1,4 @@
-"""Utility functions for MCPCat."""
+"""Utility functions for AgentCat."""
 
 from typing import Optional
 from datetime import datetime, timezone

@@ -1,7 +1,7 @@
 """Monkey-patching implementation for dynamic tool tracking.
 
 This module patches MCP server methods to intercept tool registration and execution,
-enabling MCPCat to track tools regardless of when they are registered.
+enabling AgentCat to track tools regardless of when they are registered.
 """
 
 import inspect
@@ -34,23 +34,23 @@ from mcpcat.modules.session import (
     get_client_info_from_request_context,
     get_server_session_id,
 )
-from mcpcat.types import EventType, MCPCatData, UnredactedEvent
+from mcpcat.types import EventType, AgentCatData, UnredactedEvent
 
 from ..mcp_server import safe_request_context
 
 
-def get_current_mcpcat_data(server: Any, fallback: MCPCatData) -> MCPCatData:
-    """Get the current MCPCat data for a server."""
+def get_current_agentcat_data(server: Any, fallback: AgentCatData) -> AgentCatData:
+    """Get the current AgentCat data for a server."""
     data = get_server_tracking_data(server)
     return data if data else fallback
 
 
-def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
+def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool:
     """Monkey-patch FastMCP's ToolManager to intercept tool operations.
 
     Args:
         server: FastMCP server instance
-        mcpcat_data: MCPCat tracking data
+        agentcat_data: AgentCat tracking data
 
     Returns:
         True if patching was successful, False otherwise
@@ -66,7 +66,7 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
             return False
 
         # Add the get_more_tools tool if enabled
-        if mcpcat_data.options.enable_report_missing:
+        if agentcat_data.options.enable_report_missing:
             # Create the get_more_tools function that returns CallToolResult
             async def get_more_tools(
                 context: Annotated[
@@ -184,9 +184,9 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
                     register_tool(server, tool_name)
 
                     # Get current data for this server
-                    current_data = get_current_mcpcat_data(server, mcpcat_data)
+                    current_data = get_current_agentcat_data(server, agentcat_data)
 
-                    # If MCPCat is already initialized, we need to wrap this tool
+                    # If AgentCat is already initialized, we need to wrap this tool
                     if data.tracker_initialized and current_data.options.enable_tracing:
                         write_to_log(
                             f"Late-registered FastMCP tool detected: {tool_name}"
@@ -223,7 +223,7 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
             context: Any | None = None,
             **kwargs  # Accept any additional parameters for version compatibility
         ) -> Any:
-            """Patched call_tool that adds MCPCat tracking."""
+            """Patched call_tool that adds AgentCat tracking."""
             # Initialize variables for tracking
             event = None
             current_data = None
@@ -232,11 +232,11 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
                 # Try to get tracking data, but don't fail if we can't
                 try:
                     session_id = get_server_session_id(server._mcp_server)
-                    current_data = get_current_mcpcat_data(server, mcpcat_data)
+                    current_data = get_current_agentcat_data(server, agentcat_data)
                 except Exception as e:
                     write_to_log(f"Error getting tracking data: {e}")
                     session_id = "unknown"
-                    current_data = mcpcat_data
+                    current_data = agentcat_data
 
                 # Handle session identification (non-critical)
                 request_context = None
@@ -422,12 +422,12 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
                         write_to_log(f"Error publishing event: {e}")
                         # Don't re-raise, let the tool result be returned
 
-        # Patch list_tools to add MCPCat tools and context
+        # Patch list_tools to add AgentCat tools and context
         def patched_list_tools() -> List[Any]:
-            """Patched list_tools that adds MCPCat modifications."""
+            """Patched list_tools that adds AgentCat modifications."""
             try:
                 # Get current data for this server
-                current_data = get_current_mcpcat_data(server, mcpcat_data)
+                current_data = get_current_agentcat_data(server, agentcat_data)
 
                 # Get original tools with safety check
                 if not callable(original_list_tools):
@@ -552,26 +552,26 @@ def patch_fastmcp_tool_manager(server: Any, mcpcat_data: MCPCatData) -> bool:
         return False
 
 
-def apply_official_fastmcp_patches(server: Any, mcpcat_data: MCPCatData) -> bool:
+def apply_official_fastmcp_patches(server: Any, agentcat_data: AgentCatData) -> bool:
     """Apply monkey patches for FastMCP servers only.
 
     Args:
         server: FastMCP server instance
-        mcpcat_data: MCPCat tracking data
+        agentcat_data: AgentCat tracking data
 
     Returns:
         True if patching was successful
     """
-    # The MCPCat data is already stored by the caller
+    # The AgentCat data is already stored by the caller
     # Just verify we can get it
     data = get_server_tracking_data(server)
     if not data:
-        write_to_log(f"Warning: MCPCat data not found for server {id(server)}")
+        write_to_log(f"Warning: AgentCat data not found for server {id(server)}")
         return False
 
     # Only patch FastMCP servers
     if is_official_fastmcp_server(server):
-        if patch_fastmcp_tool_manager(server, mcpcat_data):
+        if patch_fastmcp_tool_manager(server, agentcat_data):
             write_to_log(
                 f"Monkey patches applied successfully to FastMCP server {id(server)}"
             )

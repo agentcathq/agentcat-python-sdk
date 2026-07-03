@@ -19,7 +19,7 @@ def reset(monkeypatch):
 
 def test_end_to_end_buffers_and_posts():
     diagnostics.init_diagnostics("proj_int")
-    write_to_log("MCPCat setup started | project proj_int | server lowlevel")
+    write_to_log("AgentCat setup started | project proj_int | server lowlevel")
 
     with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()

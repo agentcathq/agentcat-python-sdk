@@ -1,6 +1,6 @@
-"""MCPCat Middleware for Community FastMCP v3.
+"""AgentCat Middleware for Community FastMCP v3.
 
-This module provides a middleware implementation that integrates MCPCat
+This module provides a middleware implementation that integrates AgentCat
 tracking capabilities with the FastMCP v3 middleware system.
 """
 
@@ -28,32 +28,32 @@ from mcpcat.modules.session import (
     get_client_info_from_request_context,
     get_server_session_id,
 )
-from mcpcat.types import EventType, MCPCatData, UnredactedEvent
+from mcpcat.types import EventType, AgentCatData, UnredactedEvent
 
 if TYPE_CHECKING:
     from fastmcp.server.middleware import CallNext, MiddlewareContext
     from fastmcp.tools.tool import Tool, ToolResult
 
 
-class MCPCatMiddleware:
-    """Middleware for MCPCat tracking in FastMCP v3.
+class AgentCatMiddleware:
+    """Middleware for AgentCat tracking in FastMCP v3.
 
     This middleware intercepts tool calls, list_tools, and initialize events
-    to provide analytics tracking for MCPCat.
+    to provide analytics tracking for AgentCat.
 
     Attributes:
-        mcpcat_data: The MCPCat tracking data configuration.
+        agentcat_data: The AgentCat tracking data configuration.
         server: The FastMCP server instance.
     """
 
-    def __init__(self, mcpcat_data: MCPCatData, server: Any) -> None:
-        """Initialize the MCPCat middleware.
+    def __init__(self, agentcat_data: AgentCatData, server: Any) -> None:
+        """Initialize the AgentCat middleware.
 
         Args:
-            mcpcat_data: MCPCat tracking configuration.
+            agentcat_data: AgentCat tracking configuration.
             server: The FastMCP v3 server instance.
         """
-        self.mcpcat_data = mcpcat_data
+        self.agentcat_data = agentcat_data
         self.server = server
 
     async def __call__(
@@ -132,7 +132,7 @@ class MCPCatMiddleware:
             client_name=client_name,
             client_version=client_version,
         )
-        await attach_event_metadata(event, self.mcpcat_data, context.message, request_context)
+        await attach_event_metadata(event, self.agentcat_data, context.message, request_context)
 
         try:
             result = await call_next(context)
@@ -182,7 +182,7 @@ class MCPCatMiddleware:
         # Extract user intent and determine if we should remove context from arguments
         user_intent = None
         should_remove_context = (
-            self.mcpcat_data.options.enable_tool_call_context
+            self.agentcat_data.options.enable_tool_call_context
             and tool_name != "get_more_tools"
         )
 
@@ -208,7 +208,7 @@ class MCPCatMiddleware:
             client_name=client_name,
             client_version=client_version,
         )
-        await attach_event_metadata(event, self.mcpcat_data, context.message, request_context)
+        await attach_event_metadata(event, self.agentcat_data, context.message, request_context)
 
         # Create modified context without context parameter if needed
         call_context = context
@@ -292,7 +292,7 @@ class MCPCatMiddleware:
             client_name=client_name,
             client_version=client_version,
         )
-        await attach_event_metadata(event, self.mcpcat_data, context.message, request_context)
+        await attach_event_metadata(event, self.agentcat_data, context.message, request_context)
 
         try:
             tools = list(await call_next(context))
@@ -301,7 +301,7 @@ class MCPCatMiddleware:
                 register_tool(self.server, tool.name)
                 mark_tool_tracked(self.server, tool.name)
 
-            if self.mcpcat_data.options.enable_tool_call_context:
+            if self.agentcat_data.options.enable_tool_call_context:
                 tools = self._inject_context_into_tools(tools)
 
             event.response = {"tools": [self._tool_to_dict(t) for t in tools]}
@@ -325,7 +325,7 @@ class MCPCatMiddleware:
             return get_server_session_id(self.server)
         except Exception as e:
             write_to_log(f"Error getting session ID: {e}")
-            return self.mcpcat_data.session_id
+            return self.agentcat_data.session_id
 
     def _get_request_context(self, context: MiddlewareContext[Any]) -> Any:
         """Get the MCP request context from middleware context.
@@ -347,7 +347,7 @@ class MCPCatMiddleware:
             event: The event to publish.
             event_name: Human-readable name for error logging.
         """
-        if not self.mcpcat_data.options.enable_tracing:
+        if not self.agentcat_data.options.enable_tracing:
             return
 
         try:
@@ -379,7 +379,7 @@ class MCPCatMiddleware:
         Returns:
             List of tools with context parameter injected.
         """
-        context_description = self.mcpcat_data.options.custom_context_description
+        context_description = self.agentcat_data.options.custom_context_description
         modified_tools = []
 
         for tool in tools:

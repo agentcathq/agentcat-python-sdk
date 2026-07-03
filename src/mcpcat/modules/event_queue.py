@@ -1,4 +1,4 @@
-"""Event queue implementation for MCPCat."""
+"""Event queue implementation for AgentCat."""
 
 import atexit
 import queue
@@ -28,7 +28,7 @@ from .session import get_session_info, set_last_activity
 
 
 class EventQueue:
-    """Manages event queue and sending to MCPCat API."""
+    """Manages event queue and sending to AgentCat API."""
 
     def __init__(self, api_client=None):
         self.queue: queue.Queue[UnredactedEvent] = queue.Queue(maxsize=10000)
@@ -136,7 +136,7 @@ class EventQueue:
         if event:
             event.id = event.id or generate_prefixed_ksuid("evt")
 
-            # Send to MCPCat API only if project_id exists
+            # Send to AgentCat API only if project_id exists
             if event.project_id:
                 self._send_event(event)
 
@@ -148,7 +148,7 @@ class EventQueue:
                     write_to_log(f"Telemetry export submission failed: {e}")
 
             if not event.project_id and not _telemetry_manager:
-                # Warn if we have neither MCPCat nor telemetry configured
+                # Warn if we have neither AgentCat nor telemetry configured
                 write_to_log(
                     "Warning: Event has no project_id and no telemetry exporters configured"
                 )

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 from mcpcat.modules.internal import (
     get_server_tracking_data,
@@ -59,7 +59,7 @@ class TestCommunityEventCapture:
 
         # Create and track server
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -106,7 +106,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -136,7 +136,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True, enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tracing=True, enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -182,7 +182,7 @@ class TestCommunityEventCapture:
             )
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True, identify=identify_fn)
+        options = AgentCatOptions(enable_tracing=True, identify=identify_fn)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -217,7 +217,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -257,7 +257,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -304,7 +304,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -338,7 +338,7 @@ class TestCommunityEventCapture:
         set_event_queue(test_queue)
 
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:

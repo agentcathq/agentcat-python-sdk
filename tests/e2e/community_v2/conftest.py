@@ -16,7 +16,7 @@ from typing import Any, Callable, Tuple
 import pytest
 
 import mcpcat
-from mcpcat import MCPCatOptions
+from mcpcat import AgentCatOptions
 from mcpcat.modules.compatibility import (
     is_community_fastmcp_v2,
     is_community_fastmcp_v3,
@@ -45,8 +45,8 @@ def _create_v2_todo_server() -> Any:
     return mcp
 
 
-def _default_options_factory() -> MCPCatOptions:
-    return MCPCatOptions(enable_tracing=True)
+def _default_options_factory() -> AgentCatOptions:
+    return AgentCatOptions(enable_tracing=True)
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +62,7 @@ def v2_http_server(request) -> Tuple[str, Any]:
     if not is_community_fastmcp_v2(server):
         pytest.skip("server is not detected as community FastMCP v2")
 
-    options_factory: Callable[[], MCPCatOptions] = getattr(
+    options_factory: Callable[[], AgentCatOptions] = getattr(
         request.module, "MCPCAT_OPTIONS_FACTORY", _default_options_factory
     )
     options = options_factory()

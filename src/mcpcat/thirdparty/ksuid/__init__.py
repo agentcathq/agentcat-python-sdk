@@ -1,4 +1,4 @@
-"""KSUID (K-Sortable Unique Identifier) implementation for MCPCat."""
+"""KSUID (K-Sortable Unique Identifier) implementation for AgentCat."""
 
 from .ksuid import Ksuid, KsuidMs
 

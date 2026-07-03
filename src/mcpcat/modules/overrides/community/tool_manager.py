@@ -43,7 +43,7 @@ def _ensure_context_parameter(tool: Any, description: str) -> None:
 
 
 def patch_community_fastmcp_tool_manager(server: Any) -> None:
-    """Patch the community FastMCP tool manager to add MCPCat tracking.
+    """Patch the community FastMCP tool manager to add AgentCat tracking.
 
     This function modifies the tool manager to:
     1. Add context parameter to existing tools

@@ -3,20 +3,20 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from mcpcat.types import MCPCatOptions
+from mcpcat.types import AgentCatOptions
 
 
-class TestMCPCatOptionsApiBaseUrl:
-    """Test api_base_url field on MCPCatOptions."""
+class TestAgentCatOptionsApiBaseUrl:
+    """Test api_base_url field on AgentCatOptions."""
 
     def test_default_is_none(self):
-        """MCPCatOptions should have api_base_url default to None."""
-        opts = MCPCatOptions()
+        """AgentCatOptions should have api_base_url default to None."""
+        opts = AgentCatOptions()
         assert opts.api_base_url is None
 
     def test_can_set_api_base_url(self):
-        """MCPCatOptions should accept an api_base_url parameter."""
-        opts = MCPCatOptions(api_base_url="https://custom.example.com")
+        """AgentCatOptions should accept an api_base_url parameter."""
+        opts = AgentCatOptions(api_base_url="https://custom.example.com")
         assert opts.api_base_url == "https://custom.example.com"
 
 
@@ -124,13 +124,13 @@ class TestTrackApiBaseUrl:
 
     def test_option_overrides_default(self):
         """api_base_url option should trigger configure() on event_queue."""
-        opts = MCPCatOptions(api_base_url="https://custom.example.com")
+        opts = AgentCatOptions(api_base_url="https://custom.example.com")
         mock_eq = self._call_track_with_patches(opts)
         mock_eq.configure.assert_called_once_with("https://custom.example.com")
 
     def test_env_var_overrides_default(self):
         """MCPCAT_API_URL env var should trigger configure() when no option set."""
-        opts = MCPCatOptions()
+        opts = AgentCatOptions()
         mock_eq = self._call_track_with_patches(
             opts, env_vars={"MCPCAT_API_URL": "https://env.example.com"}
         )
@@ -138,7 +138,7 @@ class TestTrackApiBaseUrl:
 
     def test_agentcat_env_var_overrides_default(self):
         """AGENTCAT_API_URL env var should trigger configure() when no option set."""
-        opts = MCPCatOptions()
+        opts = AgentCatOptions()
         mock_eq = self._call_track_with_patches(
             opts, env_vars={"AGENTCAT_API_URL": "https://new.example.com"}
         )
@@ -146,7 +146,7 @@ class TestTrackApiBaseUrl:
 
     def test_agentcat_env_var_takes_precedence_over_mcpcat(self):
         """AGENTCAT_API_URL wins over the legacy MCPCAT_API_URL fallback."""
-        opts = MCPCatOptions()
+        opts = AgentCatOptions()
         mock_eq = self._call_track_with_patches(
             opts,
             env_vars={
@@ -158,7 +158,7 @@ class TestTrackApiBaseUrl:
 
     def test_option_takes_precedence_over_env_var(self):
         """api_base_url option should take precedence over MCPCAT_API_URL env var."""
-        opts = MCPCatOptions(api_base_url="https://option.example.com")
+        opts = AgentCatOptions(api_base_url="https://option.example.com")
         mock_eq = self._call_track_with_patches(
             opts, env_vars={"MCPCAT_API_URL": "https://env.example.com"}
         )
@@ -166,6 +166,6 @@ class TestTrackApiBaseUrl:
 
     def test_no_configure_when_using_default(self):
         """configure() should NOT be called when neither option nor env var is set."""
-        opts = MCPCatOptions()
+        opts = AgentCatOptions()
         mock_eq = self._call_track_with_patches(opts)
         mock_eq.configure.assert_not_called()

@@ -7,11 +7,11 @@ import time
 
 import pytest
 
-from mcpcat import MCPCatOptions
+from mcpcat import AgentCatOptions
 
 
-def MCPCAT_OPTIONS_FACTORY() -> MCPCatOptions:
-    return MCPCatOptions(enable_tracing=True, stateless=True)
+def MCPCAT_OPTIONS_FACTORY() -> AgentCatOptions:
+    return AgentCatOptions(enable_tracing=True, stateless=True)
 
 
 pytestmark = pytest.mark.e2e

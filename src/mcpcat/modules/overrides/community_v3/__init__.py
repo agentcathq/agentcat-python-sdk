@@ -3,9 +3,9 @@
 from mcpcat.modules.overrides.community_v3.integration import (
     apply_community_v3_integration,
 )
-from mcpcat.modules.overrides.community_v3.middleware import MCPCatMiddleware
+from mcpcat.modules.overrides.community_v3.middleware import AgentCatMiddleware
 
 __all__ = [
-    "MCPCatMiddleware",
+    "AgentCatMiddleware",
     "apply_community_v3_integration",
 ]

@@ -1,4 +1,4 @@
-"""Sentry exporter for MCPCat telemetry."""
+"""Sentry exporter for AgentCat telemetry."""
 
 import json
 import re
@@ -14,7 +14,7 @@ from .trace_context import trace_context
 
 
 class SentryExporter(Exporter):
-    """Exports MCPCat events to Sentry as logs, transactions, and error events."""
+    """Exports AgentCat events to Sentry as logs, transactions, and error events."""
 
     def __init__(self, config: SentryExporterConfig):
         """
@@ -85,7 +85,7 @@ class SentryExporter(Exporter):
         Export an event to Sentry.
 
         Args:
-            event: MCPCat event to export
+            event: AgentCat event to export
         """
         try:
             # ALWAYS send log
@@ -174,10 +174,10 @@ class SentryExporter(Exporter):
 
     def event_to_log(self, event: Event) -> Dict[str, Any]:
         """
-        Convert MCPCat event to Sentry log format.
+        Convert AgentCat event to Sentry log format.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Sentry log dictionary
@@ -215,7 +215,7 @@ class SentryExporter(Exporter):
         Build log attributes for Sentry.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Attributes dictionary
@@ -308,10 +308,10 @@ class SentryExporter(Exporter):
 
     def event_to_transaction(self, event: Event) -> Dict[str, Any]:
         """
-        Convert MCPCat event to Sentry transaction.
+        Convert AgentCat event to Sentry transaction.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Sentry transaction dictionary
@@ -361,7 +361,7 @@ class SentryExporter(Exporter):
         Build tags for Sentry transaction/error.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Tags dictionary
@@ -406,7 +406,7 @@ class SentryExporter(Exporter):
         Build extra data for Sentry transaction/error.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Extra data dictionary
@@ -436,10 +436,10 @@ class SentryExporter(Exporter):
         self, event: Event, transaction: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Convert MCPCat event to Sentry error event.
+        Convert AgentCat event to Sentry error event.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
             transaction: Optional transaction for context
 
         Returns:

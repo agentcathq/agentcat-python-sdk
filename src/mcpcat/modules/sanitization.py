@@ -1,7 +1,7 @@
-"""Content sanitization for MCPCat events.
+"""Content sanitization for AgentCat events.
 
 Strips binary/non-text content (images, audio, base64 blobs) from event
-payloads before they are sent to the MCPCat API or telemetry exporters.
+payloads before they are sent to the AgentCat API or telemetry exporters.
 """
 
 import copy
@@ -20,14 +20,14 @@ _BASE64_SIZE_THRESHOLD = 10_240
 _BASE64_PATTERN = re.compile(r"^[A-Za-z0-9+/\n\r]+=*$")
 
 # Redaction messages
-_IMAGE_REDACTED = "[image content redacted - not supported by mcpcat]"
-_AUDIO_REDACTED = "[audio content redacted - not supported by mcpcat]"
-_BLOB_RESOURCE_REDACTED = "[binary resource content redacted - not supported by mcpcat]"
-_BINARY_DATA_REDACTED = "[binary data redacted - not supported by mcpcat]"
+_IMAGE_REDACTED = "[image content redacted - not supported by agentcat]"
+_AUDIO_REDACTED = "[audio content redacted - not supported by agentcat]"
+_BLOB_RESOURCE_REDACTED = "[binary resource content redacted - not supported by agentcat]"
+_BINARY_DATA_REDACTED = "[binary data redacted - not supported by agentcat]"
 
 
 def _unsupported_type_redacted(type_name: str) -> str:
-    return f'[unsupported content type "{type_name}" redacted - not supported by mcpcat]'
+    return f'[unsupported content type "{type_name}" redacted - not supported by agentcat]'
 
 
 # ---------------------------------------------------------------------------

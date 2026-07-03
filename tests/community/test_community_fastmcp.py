@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -109,7 +109,7 @@ class TestCommunityFastMCPWithMCPCat:
     async def test_mcpcat_tracking_basic(self):
         """Test that MCPCat can track a community FastMCP server."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=False)
+        options = AgentCatOptions(enable_tool_call_context=False)
 
         # This will likely fail initially due to incompatibilities
         # but demonstrates the intended usage
@@ -124,7 +124,7 @@ class TestCommunityFastMCPWithMCPCat:
     async def test_mcpcat_tracking_with_context(self):
         """Test MCPCat context injection with community FastMCP."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
 
         # Track the server with context enabled
         track(server, "test_project", options)

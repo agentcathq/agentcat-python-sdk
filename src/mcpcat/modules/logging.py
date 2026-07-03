@@ -1,10 +1,10 @@
-"""Logging functionality for MCPCat."""
+"""Logging functionality for AgentCat."""
 
 import os
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from mcpcat.types import MCPCatOptions
+from mcpcat.types import AgentCatOptions
 
 
 # Initialize debug_mode from environment variable at module load time
@@ -16,7 +16,7 @@ else:
 
 
 # Optional sink that receives every (clean, newline-free) log entry. Used by the
-# diagnostics module to mirror internal logs to MCPCat's monitoring. Fires
+# diagnostics module to mirror internal logs to AgentCat's monitoring. Fires
 # independent of debug_mode and must never break logging.
 _diagnostics_sink: Callable[[str], None] | None = None
 

@@ -1,4 +1,4 @@
-"""MCPCat - Analytics Tool for MCP Servers."""
+"""AgentCat - Analytics Tool for MCP Servers."""
 
 import os
 import warnings
@@ -25,8 +25,8 @@ from .types import (
     EventPropertiesFunction,
     EventTagsFunction,
     IdentifyFunction,
-    MCPCatData,
-    MCPCatOptions,
+    AgentCatData,
+    AgentCatOptions,
     RedactionFunction,
     UserIdentity,
 )
@@ -38,7 +38,7 @@ def _detect_stateless(server) -> bool:
     Best-effort: community FastMCP v3 deprecated per-instance .settings
     in favor of global fastmcp.settings, but the global isn't per-server.
     The deprecated shim is the only per-instance API available.
-    MCPCatOptions(stateless=True) is the recommended explicit path.
+    AgentCatOptions(stateless=True) is the recommended explicit path.
     """
     try:
         with warnings.catch_warnings():
@@ -47,7 +47,7 @@ def _detect_stateless(server) -> bool:
             if result:
                 write_to_log(
                     "Auto-detected stateless HTTP mode from your FastMCP server's .settings. "
-                    "If this is incorrect, please pass stateless=False to MCPCatOptions and file a bug report."
+                    "If this is incorrect, please pass stateless=False to AgentCatOptions and file a bug report."
                 )
             return result
     except (AttributeError, RuntimeError):
@@ -55,14 +55,14 @@ def _detect_stateless(server) -> bool:
 
 
 def track(
-    server: Any, project_id: str | None = None, options: MCPCatOptions | None = None
+    server: Any, project_id: str | None = None, options: AgentCatOptions | None = None
 ) -> Any:
     """
-    Initialize MCPCat tracking with optional telemetry export.
+    Initialize AgentCat tracking with optional telemetry export.
 
     Args:
         server: MCP server instance to track
-        project_id: MCPCat project ID (optional if using telemetry-only mode)
+        project_id: AgentCat project ID (optional if using telemetry-only mode)
         options: Configuration options including telemetry exporters
 
     Returns:
@@ -76,16 +76,16 @@ def track(
         Attach custom metadata to every auto-captured event using
         `event_tags` (string key-value pairs, validated) and
         `event_properties` (flexible JSON). See
-        https://docs.mcpcat.io/sdk/event-tags-properties.
+        https://docs.agentcat.com/sdk/event-tags-properties.
 
-        >>> import os, mcpcat
-        >>> mcpcat.track(server, "proj_abc123", mcpcat.MCPCatOptions(
+        >>> import os, agentcat
+        >>> agentcat.track(server, "proj_abc123", agentcat.AgentCatOptions(
         ...     event_tags=lambda req, ctx: {"env": os.environ.get("APP_ENV", "dev")},
         ...     event_properties=lambda req, ctx: {"feature_flags": ["dark_mode"]},
         ... ))
     """
     if options is None:
-        options = MCPCatOptions()
+        options = AgentCatOptions()
 
     set_debug_mode(options.debug_mode)
 
@@ -100,7 +100,7 @@ def track(
         if not project_id and not options.exporters:
             raise ValueError(
                 "Either project_id or exporters must be provided. "
-                "Use project_id for MCPCat, exporters for telemetry-only mode, or both."
+                "Use project_id for AgentCat, exporters for telemetry-only mode, or both."
             )
 
         if not is_compatible_server(server):
@@ -128,7 +128,7 @@ def track(
             else "lowlevel"
         )
         write_to_log(
-            f"MCPCat setup started | project {project_id or '(telemetry-only)'} | "
+            f"AgentCat setup started | project {project_id or '(telemetry-only)'} | "
             f"server {server_kind}"
         )
 
@@ -144,7 +144,7 @@ def track(
 
         session_id = new_session_id()
         session_info = get_session_info(lowlevel_server)
-        data = MCPCatData(
+        data = AgentCatData(
             session_id=session_id,
             project_id=project_id,
             last_activity=datetime.now(timezone.utc),
@@ -177,18 +177,18 @@ def track(
 
         if project_id:
             write_to_log(
-                f"MCPCat initialized with dynamic tracking for session "
+                f"AgentCat initialized with dynamic tracking for session "
                 f"{session_id} on project {project_id}"
             )
         else:
             write_to_log(
-                f"MCPCat initialized in telemetry-only mode for session {session_id}"
+                f"AgentCat initialized in telemetry-only mode for session {session_id}"
             )
 
         # Metadata-only setup-complete beacon (INFO). A start-without-complete
         # (or the ERROR diagnostics below) signals a failed setup.
         write_to_log(
-            f"MCPCat setup complete | project {project_id or '(telemetry-only)'} | "
+            f"AgentCat setup complete | project {project_id or '(telemetry-only)'} | "
             f"tracing={options.enable_tracing} "
             f"context={options.enable_tool_call_context} "
             f"report_missing={options.enable_report_missing} "
@@ -201,7 +201,7 @@ def track(
         write_to_log(f"Warning: Failed to track server - {e}")
         raise
     except Exception as e:
-        write_to_log(f"Error initializing MCPCat: {e}")
+        write_to_log(f"Error initializing AgentCat: {e}")
 
     return server
 
@@ -209,7 +209,7 @@ def track(
 def _apply_server_tracking(
     server: Any,
     lowlevel_server: Any,
-    data: MCPCatData,
+    data: AgentCatData,
     is_community_v3: bool,
     is_official_fastmcp: bool,
     is_community_v2: bool,
@@ -252,7 +252,7 @@ __all__ = [
     # Main API
     "track",
     # Configuration
-    "MCPCatOptions",
+    "AgentCatOptions",
     # Types for identify functionality
     "UserIdentity",
     "IdentifyFunction",

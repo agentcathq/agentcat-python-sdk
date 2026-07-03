@@ -13,7 +13,7 @@ class Exporter(ABC):
         Export an event to the telemetry backend.
 
         Args:
-            event: The MCPCat event to export
+            event: The AgentCat event to export
 
         Note:
             This method should handle all errors internally and never

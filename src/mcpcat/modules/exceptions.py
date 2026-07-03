@@ -1,4 +1,4 @@
-"""Exception tracking module for MCPCat."""
+"""Exception tracking module for AgentCat."""
 
 import contextvars
 import linecache

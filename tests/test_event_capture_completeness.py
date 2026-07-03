@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 
 from mcp import Implementation
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
 from mcpcat.types import UserIdentity
@@ -46,7 +46,7 @@ class TestEventCaptureCompleteness:
 
         # Create and track server
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -93,7 +93,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Create client with default info
@@ -126,7 +126,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -157,7 +157,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -189,7 +189,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tracing=True, enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -242,7 +242,7 @@ class TestEventCaptureCompleteness:
             )
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, identify=identify_fn)
+        options = AgentCatOptions(enable_tracing=True, identify=identify_fn)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -277,7 +277,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -322,7 +322,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -357,7 +357,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -392,7 +392,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Creating the client triggers initialization
@@ -444,7 +444,7 @@ class TestEventCaptureCompleteness:
             return None
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, identify=custom_identify)
+        options = AgentCatOptions(enable_tracing=True, identify=custom_identify)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -484,7 +484,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:

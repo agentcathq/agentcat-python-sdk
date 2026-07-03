@@ -15,7 +15,7 @@ from typing import Any, Callable, Tuple
 import pytest
 
 import mcpcat
-from mcpcat import MCPCatOptions
+from mcpcat import AgentCatOptions
 
 from tests.e2e._helpers import find_free_port, wait_for_port
 
@@ -45,8 +45,8 @@ def _create_v3_todo_server() -> Any:
     return mcp
 
 
-def _default_options_factory() -> MCPCatOptions:
-    return MCPCatOptions(enable_tracing=True)
+def _default_options_factory() -> AgentCatOptions:
+    return AgentCatOptions(enable_tracing=True)
 
 
 @pytest.fixture(scope="module")
@@ -58,7 +58,7 @@ def v3_http_server(request) -> Tuple[str, Any]:
     if not is_community_fastmcp_v3(server):
         pytest.skip("installed fastmcp is not v3")
 
-    options_factory: Callable[[], MCPCatOptions] = getattr(
+    options_factory: Callable[[], AgentCatOptions] = getattr(
         request.module, "MCPCAT_OPTIONS_FACTORY", _default_options_factory
     )
     options = options_factory()

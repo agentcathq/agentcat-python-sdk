@@ -1,7 +1,7 @@
 """Monkey-patching implementation for community FastMCP servers.
 
 This module patches community FastMCP servers to intercept tool operations
-and add MCPCat tracking capabilities.
+and add AgentCat tracking capabilities.
 """
 
 from datetime import datetime, timezone

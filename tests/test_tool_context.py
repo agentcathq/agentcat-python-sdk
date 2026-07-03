@@ -8,7 +8,7 @@ from mcp.server import Server
 from mcp.server.fastmcp import FastMCP
 from mcp.types import Tool
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 
@@ -23,7 +23,7 @@ class TestToolContext:
     async def test_context_parameter_injection_enabled(self):
         """Test that context parameter is added when enable_tool_call_context=True."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -52,7 +52,7 @@ class TestToolContext:
     async def test_context_parameter_not_injected_when_disabled(self):
         """Test that context parameter is NOT added when enable_tool_call_context=False."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=False)
+        options = AgentCatOptions(enable_tool_call_context=False)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -72,7 +72,7 @@ class TestToolContext:
     async def test_schema_with_existing_properties(self):
         """Test with tools that have existing inputSchema and properties."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -100,7 +100,7 @@ class TestToolContext:
             return "success"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -128,7 +128,7 @@ class TestToolContext:
             return "success"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -143,7 +143,7 @@ class TestToolContext:
     async def test_schema_with_existing_required_fields(self):
         """Test with tools that already have required fields."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -168,7 +168,7 @@ class TestToolContext:
             return f"Result: {param1}"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -188,7 +188,7 @@ class TestToolContext:
         mcp = FastMCP("empty-server")
         server = mcp
 
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -204,7 +204,7 @@ class TestToolContext:
     async def test_get_more_tools_exclusion_with_context(self):
         """Test that get_more_tools doesn't get context when both features are enabled."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True, enable_tool_call_context=True
         )
         track(server, "test_project", options)
@@ -238,7 +238,7 @@ class TestToolContext:
             return "success"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -268,7 +268,7 @@ class TestToolContext:
             return "success"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -306,7 +306,7 @@ class TestToolContext:
             return f"Original context: {context}, data: {data}"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -350,7 +350,7 @@ class TestToolContext:
             return f"Data: {data}, Required: {required_field}"
 
         server = mcp
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -378,7 +378,7 @@ class TestToolContext:
     async def test_tool_call_with_valid_context(self):
         """Test calling a tool with valid context parameter."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -399,7 +399,7 @@ class TestToolContext:
     async def test_tool_call_without_context_fails(self):
         """Test that tool calls without context fail validation."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -418,7 +418,7 @@ class TestToolContext:
     async def test_tool_call_with_empty_context(self):
         """Test calling a tool with empty string context."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -438,7 +438,7 @@ class TestToolContext:
     async def test_tool_call_with_long_context(self):
         """Test calling a tool with very long context string."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -456,7 +456,7 @@ class TestToolContext:
     async def test_tool_call_with_unicode_context(self):
         """Test calling a tool with special characters/unicode in context."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -474,7 +474,7 @@ class TestToolContext:
     async def test_tool_call_with_null_context(self):
         """Test calling a tool with null/None context value."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -491,7 +491,7 @@ class TestToolContext:
     async def test_original_functionality_preserved(self):
         """Verify that original tool functionality remains intact with context."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -525,7 +525,7 @@ class TestToolContext:
         # This test verifies the current implementation behavior
         # Context is added to schema but stripped from arguments before passing to handler
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -546,11 +546,11 @@ class TestToolContext:
         server = create_todo_server()
 
         # First track with context disabled
-        options1 = MCPCatOptions(enable_tool_call_context=False)
+        options1 = AgentCatOptions(enable_tool_call_context=False)
         track(server, "project1", options1)
 
         # Second track with context enabled
-        options2 = MCPCatOptions(enable_tool_call_context=True)
+        options2 = AgentCatOptions(enable_tool_call_context=True)
         track(server, "project2", options2)
 
         async with create_test_client(server) as client:
@@ -567,7 +567,7 @@ class TestToolContext:
         server = create_todo_server()
 
         # Track with context enabled
-        options_enabled = MCPCatOptions(enable_tool_call_context=True)
+        options_enabled = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options_enabled)
 
         async with create_test_client(server) as client:
@@ -578,7 +578,7 @@ class TestToolContext:
 
         # The current implementation updates the tracking data with new options
         # Track again with context disabled
-        options_disabled = MCPCatOptions(enable_tool_call_context=False)
+        options_disabled = AgentCatOptions(enable_tool_call_context=False)
         track(server, "test_project", options_disabled)
 
         async with create_test_client(server) as client:
@@ -597,7 +597,7 @@ class TestToolContext:
         # This test would require mocking internal functions to force errors
         # For now, we'll test that the system is resilient
         server = create_todo_server()
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -617,7 +617,7 @@ class TestToolContext:
         """Test that custom context description is correctly applied."""
         server = create_todo_server()
         custom_description = "Explain your reasoning for using this tool"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_description
         )
@@ -639,7 +639,7 @@ class TestToolContext:
     async def test_custom_context_description_empty_string(self):
         """Test edge case with empty string custom description."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=""  # Empty string
         )
@@ -661,7 +661,7 @@ class TestToolContext:
         """Test custom description with special characters and Unicode."""
         server = create_todo_server()
         special_description = "Why are you using this? 🤔 Include: quotes\"', newlines\n, tabs\t, etc."
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=special_description
         )
@@ -681,7 +681,7 @@ class TestToolContext:
         server = create_todo_server()
         # Create a very long description
         long_description = "This is a very detailed description. " * 50  # ~1800 characters
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=long_description
         )
@@ -701,7 +701,7 @@ class TestToolContext:
         """Verify the default description is used when not specified."""
         server = create_todo_server()
         # Don't specify custom_context_description, should use default
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -734,7 +734,7 @@ class TestToolContext:
 
         server = mcp
         custom_desc = "Custom context for all tools"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_desc
         )
@@ -755,14 +755,14 @@ class TestToolContext:
         server = create_todo_server()
 
         # First track with one description
-        options1 = MCPCatOptions(
+        options1 = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description="First description"
         )
         track(server, "test_project", options1)
 
         # Second track with different description
-        options2 = MCPCatOptions(
+        options2 = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description="Second description"
         )
@@ -783,7 +783,7 @@ class TestToolContext:
         """Test tool calls work correctly with custom context description."""
         server = create_todo_server()
         custom_desc = "Provide detailed reasoning for this action"
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             custom_context_description=custom_desc
         )
@@ -816,7 +816,7 @@ class TestGetMoreToolsContextSchema:
     async def test_get_more_tools_context_has_string_type(self):
         """get_more_tools context parameter should have type 'string', not a union type."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True,
             enable_tool_call_context=True,
         )
@@ -842,7 +842,7 @@ class TestGetMoreToolsContextSchema:
     async def test_get_more_tools_context_has_description(self):
         """get_more_tools context parameter should have a meaningful description."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True,
             enable_tool_call_context=True,
         )
@@ -867,7 +867,7 @@ class TestGetMoreToolsContextSchema:
     async def test_get_more_tools_context_is_required(self):
         """get_more_tools context parameter should be required."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True,
             enable_tool_call_context=True,
         )
@@ -912,7 +912,7 @@ class TestUserIntentCaptureInEvents:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tracing=True,
             enable_report_missing=True,
             enable_tool_call_context=True,

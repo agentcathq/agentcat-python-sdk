@@ -11,7 +11,7 @@ from mcpcat.modules.internal import (
 )
 from mcpcat.modules.session import get_server_session_id, get_client_info_from_request_context
 from mcpcat.modules.identify import identify_session
-from mcpcat.types import MCPCatData, MCPCatOptions, SessionInfo, UserIdentity
+from mcpcat.types import AgentCatData, AgentCatOptions, SessionInfo, UserIdentity
 
 from .test_utils.todo_server import create_todo_server
 
@@ -34,11 +34,11 @@ class TestStatelessMode:
         reset_all_tracking_data()
 
     def _setup_data(self, stateless=False, identify=None):
-        """Create and store MCPCatData on the server."""
-        options = MCPCatOptions()
+        """Create and store AgentCatData on the server."""
+        options = AgentCatOptions()
         if identify:
             options.identify = identify
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="test_project",
             session_id="ses_existing123",
             session_info=SessionInfo(),
@@ -50,7 +50,7 @@ class TestStatelessMode:
         return data
 
     def test_stateless_option_sets_flag(self):
-        """MCPCatOptions(stateless=True) should set is_stateless on data."""
+        """AgentCatOptions(stateless=True) should set is_stateless on data."""
         data = self._setup_data(stateless=True)
         assert data.is_stateless is True
 
@@ -105,7 +105,7 @@ class TestStatelessMode:
     def test_track_stateless_true_sets_flag(self):
         """track() with stateless=True should set is_stateless on data."""
         server = create_todo_server()
-        options = MCPCatOptions(stateless=True)
+        options = AgentCatOptions(stateless=True)
         mcpcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         assert data.is_stateless is True
@@ -116,7 +116,7 @@ class TestStatelessMode:
         # Mock the server to look stateless
         server.settings = MagicMock()
         server.settings.stateless_http = True
-        options = MCPCatOptions(stateless=False)
+        options = AgentCatOptions(stateless=False)
         mcpcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         assert data.is_stateless is False
@@ -124,7 +124,7 @@ class TestStatelessMode:
     def test_track_stateless_none_auto_detects(self):
         """track() with stateless=None (default) should auto-detect from server."""
         server = create_todo_server()
-        options = MCPCatOptions()  # stateless=None by default
+        options = AgentCatOptions()  # stateless=None by default
         mcpcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         # create_todo_server() is not stateless, so should be False

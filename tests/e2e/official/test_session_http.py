@@ -21,11 +21,11 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Implementation
 
-from mcpcat import MCPCatOptions
+from mcpcat import AgentCatOptions
 
 
-def MCPCAT_OPTIONS_FACTORY() -> MCPCatOptions:
-    return MCPCatOptions(enable_tracing=True, stateless=True)
+def MCPCAT_OPTIONS_FACTORY() -> AgentCatOptions:
+    return AgentCatOptions(enable_tracing=True, stateless=True)
 
 
 pytestmark = pytest.mark.e2e

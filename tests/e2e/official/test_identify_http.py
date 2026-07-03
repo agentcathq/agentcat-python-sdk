@@ -1,6 +1,6 @@
 """Identify-per-event behavior over real Streamable HTTP.
 
-Tests mutate the running server's MCPCatData.options.identify to vary the hook
+Tests mutate the running server's AgentCatData.options.identify to vary the hook
 per scenario. The default options-factory is tracing-only with no identify;
 identify-swapping on the live server matches the pattern used by
 tests/test_stateless.py.

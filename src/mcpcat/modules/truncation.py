@@ -1,4 +1,4 @@
-"""Event truncation for MCPcat.
+"""Event truncation for AgentCat.
 
 Enforces a maximum event payload size by truncating oversized string
 values, limiting nesting depth and collection breadth, and detecting
@@ -30,7 +30,7 @@ def _truncate_string(value: str, max_bytes: int = MAX_STRING_BYTES) -> str:
     if byte_size <= max_bytes:
         return value
 
-    marker = f"[string truncated by MCPcat from {byte_size} bytes]"
+    marker = f"[string truncated by AgentCat from {byte_size} bytes]"
     marker_bytes = len(marker.encode("utf-8"))
     keep_bytes = max_bytes - marker_bytes
 
@@ -75,11 +75,11 @@ def _truncate_value(
                 if i >= max_breadth:
                     remaining = len(items) - max_breadth
                     result["__truncated__"] = (
-                        f"[... {remaining} more items truncated by MCPcat]"
+                        f"[... {remaining} more items truncated by AgentCat]"
                     )
                     break
                 if at_depth_limit and isinstance(v, (dict, list, tuple)):
-                    result[str(k)] = f"[nested content truncated by MCPcat at depth {max_depth}]"
+                    result[str(k)] = f"[nested content truncated by AgentCat at depth {max_depth}]"
                 else:
                     result[str(k)] = _truncate_value(
                         v, max_depth=max_depth, max_string_bytes=max_string_bytes,
@@ -90,7 +90,7 @@ def _truncate_value(
 
         if isinstance(value, (list, tuple)):
             if at_depth_limit:
-                return f"[nested content truncated by MCPcat at depth {max_depth}]"
+                return f"[nested content truncated by AgentCat at depth {max_depth}]"
             result_list = [
                 _truncate_value(
                     item, max_depth=max_depth, max_string_bytes=max_string_bytes,
@@ -103,12 +103,12 @@ def _truncate_value(
             if len(value) > max_breadth:
                 remaining = len(value) - max_breadth
                 result_list.append(
-                    f"[... {remaining} more items truncated by MCPcat]"
+                    f"[... {remaining} more items truncated by AgentCat]"
                 )
             return result_list
 
         if at_depth_limit:
-            return f"[nested content truncated by MCPcat at depth {max_depth}]"
+            return f"[nested content truncated by AgentCat at depth {max_depth}]"
 
         # Fallback for unknown types — repr and truncate
         return _truncate_string(repr(value), max_bytes=max_string_bytes)

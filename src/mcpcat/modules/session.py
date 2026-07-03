@@ -1,4 +1,4 @@
-"""Session management for MCPCat."""
+"""Session management for AgentCat."""
 
 import re
 import sys
@@ -11,7 +11,7 @@ from mcpcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_P
 from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
 from mcpcat.modules.logging import write_to_log
 
-from ..types import MCPCatData, SessionInfo
+from ..types import AgentCatData, SessionInfo
 from ..utils import generate_prefixed_ksuid
 
 
@@ -21,7 +21,7 @@ def new_session_id() -> str:
 
 
 def get_agentcat_version() -> str | None:
-    """Get the current MCPCat SDK version."""
+    """Get the current AgentCat SDK version."""
     try:
         import importlib.metadata
 
@@ -143,7 +143,7 @@ def get_client_info_from_request_context(
         return (None, None)
 
 
-def get_session_info(server: Server, data: MCPCatData | None = None) -> SessionInfo:
+def get_session_info(server: Server, data: AgentCatData | None = None) -> SessionInfo:
     """Get session information for the current MCP session."""
     session_info = SessionInfo(
         ip_address=None,  # grab from django
@@ -174,7 +174,7 @@ def set_last_activity(server: Server) -> None:
     data = get_server_tracking_data(server)
 
     if not data:
-        raise Exception("MCPCat data not initialized for this server")
+        raise Exception("AgentCat data not initialized for this server")
 
     data.last_activity = datetime.now(timezone.utc)
     set_server_tracking_data(server, data)
@@ -184,7 +184,7 @@ def get_server_session_id(server: Server) -> str | None:
     data = get_server_tracking_data(server)
 
     if not data:
-        raise Exception("MCPCat data not initialized for this server")
+        raise Exception("AgentCat data not initialized for this server")
 
     if data.is_stateless:
         return None

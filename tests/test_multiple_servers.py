@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import MagicMock
 import time
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 
 from .test_utils.client import create_test_client
@@ -35,21 +35,21 @@ class TestMultipleServers:
         server3 = create_todo_server()
 
         # Track each with different options
-        options1 = MCPCatOptions(
+        options1 = AgentCatOptions(
             enable_tracing=True,
             enable_tool_call_context=True,
             enable_report_missing=True,
         )
         track(server1, "project1", options1)
 
-        options2 = MCPCatOptions(
+        options2 = AgentCatOptions(
             enable_tracing=True,
             enable_tool_call_context=False,  # Different from server1
             enable_report_missing=False,  # Different from server1
         )
         track(server2, "project2", options2)
 
-        options3 = MCPCatOptions(
+        options3 = AgentCatOptions(
             enable_tracing=False,  # No tracing at all
             enable_tool_call_context=True,
             enable_report_missing=True,
@@ -157,7 +157,7 @@ class TestMultipleServers:
         server = create_todo_server()
 
         # First track with context disabled
-        options1 = MCPCatOptions(
+        options1 = AgentCatOptions(
             enable_tool_call_context=False, enable_report_missing=False
         )
         track(server, "test_project", options1)
@@ -174,7 +174,7 @@ class TestMultipleServers:
             assert "get_more_tools" not in tool_names
 
         # Re-track with context enabled
-        options2 = MCPCatOptions(
+        options2 = AgentCatOptions(
             enable_tool_call_context=True, enable_report_missing=True
         )
         track(server, "test_project", options2)
@@ -209,7 +209,7 @@ class TestMultipleServers:
 
         # Track each with different project IDs
         for i, server in enumerate(servers):
-            options = MCPCatOptions(
+            options = AgentCatOptions(
                 enable_tracing=True,
                 enable_tool_call_context=(i % 2 == 0),  # Alternate context
                 enable_report_missing=(i % 3 == 0),  # Every third has report_missing
@@ -265,8 +265,8 @@ class TestMultipleServers:
         server2 = create_todo_server()
 
         # Track both servers with different options
-        options1 = MCPCatOptions(enable_report_missing=True)
-        options2 = MCPCatOptions(enable_report_missing=False)
+        options1 = AgentCatOptions(enable_report_missing=True)
+        options2 = AgentCatOptions(enable_report_missing=False)
 
         track(server1, "project1", options1)
         track(server2, "project2", options2)
@@ -343,8 +343,8 @@ class TestMultipleServers:
                     )
             return None
 
-        options1 = MCPCatOptions(enable_tracing=True, identify=identify1)
-        options2 = MCPCatOptions(enable_tracing=True, identify=identify2)
+        options1 = AgentCatOptions(enable_tracing=True, identify=identify1)
+        options2 = AgentCatOptions(enable_tracing=True, identify=identify2)
 
         track(server1, "project1", options1)
         track(server2, "project2", options2)

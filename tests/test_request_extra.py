@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 from mcpcat.modules.request_extra import (
     extract_request_extra,
@@ -267,7 +267,7 @@ class TestExtraOnPublishedEvents:
         set_event_queue(EventQueue(api_client=mock_api_client))
 
         server = create_todo_server()
-        track(server, "test_project", MCPCatOptions(enable_tracing=True))
+        track(server, "test_project", AgentCatOptions(enable_tracing=True))
 
         async with create_test_client(server) as client:
             await client.call_tool(
@@ -296,7 +296,7 @@ class TestExtraOnPublishedEvents:
         set_event_queue(EventQueue(api_client=mock_api_client))
 
         server = create_todo_server()
-        track(server, "test_project", MCPCatOptions(enable_tracing=True))
+        track(server, "test_project", AgentCatOptions(enable_tracing=True))
 
         # Fake an HTTP request_context for the duration of the call. Patch BOTH
         # the module symbol and the import sites so monkey-patched call sites pick it up.
@@ -355,7 +355,7 @@ class TestExtraOnPublishedEvents:
         set_event_queue(EventQueue(api_client=mock_api_client))
 
         server = create_todo_server()
-        track(server, "test_project", MCPCatOptions(enable_tracing=True))
+        track(server, "test_project", AgentCatOptions(enable_tracing=True))
 
         fake_ctx = _http_request_context(
             headers={"x-list-header": "list-value"},

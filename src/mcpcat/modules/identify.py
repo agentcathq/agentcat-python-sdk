@@ -7,7 +7,7 @@ from mcpcat.types import EventType, UnredactedEvent, UserIdentity
 
 
 def identify_session(server, request: any, context: any) -> UserIdentity | None:
-    """Run the configured identify hook and publish a `agentcat:identify` event.
+    """Run the configured identify hook and publish an `agentcat:identify` event.
 
     Returns the resulting UserIdentity, or None if no hook is configured, the
     hook raises, or it returns a non-UserIdentity value.

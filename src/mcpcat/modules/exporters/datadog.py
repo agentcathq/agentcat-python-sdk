@@ -1,4 +1,4 @@
-"""Datadog exporter for MCPCat telemetry."""
+"""Datadog exporter for AgentCat telemetry."""
 
 import json
 import re
@@ -25,7 +25,7 @@ def _sanitize_dd_tag_value(value: str) -> str:
 
 
 class DatadogExporter(Exporter):
-    """Exports MCPCat events to Datadog logs and metrics."""
+    """Exports AgentCat events to Datadog logs and metrics."""
 
     def __init__(self, config: DatadogExporterConfig):
         """
@@ -57,7 +57,7 @@ class DatadogExporter(Exporter):
         Export an event to Datadog logs and metrics.
 
         Args:
-            event: MCPCat event to export
+            event: AgentCat event to export
         """
         write_to_log("DatadogExporter: Sending event immediately to Datadog")
 
@@ -121,10 +121,10 @@ class DatadogExporter(Exporter):
 
     def event_to_log(self, event: Event) -> Dict[str, Any]:
         """
-        Convert MCPCat event to Datadog log format.
+        Convert AgentCat event to Datadog log format.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             Datadog log dictionary
@@ -202,10 +202,10 @@ class DatadogExporter(Exporter):
 
     def event_to_metrics(self, event: Event) -> List[Dict[str, Any]]:
         """
-        Convert MCPCat event to Datadog metrics.
+        Convert AgentCat event to Datadog metrics.
 
         Args:
-            event: MCPCat event
+            event: AgentCat event
 
         Returns:
             List of Datadog metric dictionaries

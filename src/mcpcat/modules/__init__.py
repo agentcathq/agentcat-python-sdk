@@ -1,4 +1,4 @@
-"""MCPCat modules."""
+"""AgentCat modules."""
 
 from .compatibility import is_compatible_server, is_official_fastmcp_server
 from .context_parameters import (

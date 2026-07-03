@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.constants import AGENTCAT_SOURCE
 from mcpcat.modules.event_queue import EventQueue, set_event_queue
 from mcpcat.modules.internal import (
@@ -15,19 +15,19 @@ from mcpcat.modules.internal import (
     resolve_event_tags,
 )
 from mcpcat.modules.redaction import redact_event
-from mcpcat.types import EventType, MCPCatData, SessionInfo, UnredactedEvent
+from mcpcat.types import EventType, AgentCatData, SessionInfo, UnredactedEvent
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
 
 
-def _make_data(event_tags=None, event_properties=None) -> MCPCatData:
-    return MCPCatData(
+def _make_data(event_tags=None, event_properties=None) -> AgentCatData:
+    return AgentCatData(
         project_id="p",
         session_id="ses_x",
         last_activity=None,
         session_info=SessionInfo(),
-        options=MCPCatOptions(
+        options=AgentCatOptions(
             event_tags=event_tags, event_properties=event_properties
         ),
     )
@@ -195,7 +195,7 @@ class TestFastMCPIntegration:
         track(
             server,
             "proj_test",
-            MCPCatOptions(
+            AgentCatOptions(
                 event_tags=lambda req, ctx: {"env": "test", "bad!": "dropped"},
                 event_properties=lambda req, ctx: {"flag": True, "build": "abc"},
             ),
@@ -222,7 +222,7 @@ class TestFastMCPIntegration:
             raise RuntimeError("callback broken")
 
         server = create_todo_server()
-        track(server, "proj_test", MCPCatOptions(event_tags=boom, event_properties=boom))
+        track(server, "proj_test", AgentCatOptions(event_tags=boom, event_properties=boom))
 
         async with create_test_client(server) as client:
             await client.call_tool("add_todo", {"text": "hi"})
@@ -250,7 +250,7 @@ class TestFastMCPIntegration:
         track(
             server,
             "proj_test",
-            MCPCatOptions(event_tags=async_tags, event_properties=async_props),
+            AgentCatOptions(event_tags=async_tags, event_properties=async_props),
         )
 
         async with create_test_client(server) as client:

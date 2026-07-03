@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 import time
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -28,7 +28,7 @@ class TestCommunityReportMissing:
         server = create_community_todo_server()
 
         # Track the server with report_missing enabled
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         # Use client to list all tools and verify report_missing is injected
@@ -51,7 +51,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_tool_schema(self):
         """Test that get_more_tools has context as a required string, not anyOf."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -83,7 +83,7 @@ class TestCommunityReportMissing:
         server = create_community_todo_server()
 
         # Track with report_missing disabled
-        options = MCPCatOptions(enable_report_missing=False)
+        options = AgentCatOptions(enable_report_missing=False)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -99,7 +99,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_tool_call_success(self):
         """Call report_missing tool and verify it executes successfully."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -116,7 +116,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_with_valid_params(self):
         """Test with various valid parameters."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -136,7 +136,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_with_missing_params(self):
         """Test error handling when required parameters are missing."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -154,7 +154,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_with_other_tools(self):
         """Verify report_missing doesn't interfere with existing server tools."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -176,7 +176,7 @@ class TestCommunityReportMissing:
     async def test_multiple_report_missing_calls(self):
         """Test calling report_missing multiple times in succession."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -200,7 +200,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_with_context_enabled(self):
         """Test interaction when both report_missing and tool_context are enabled."""
         server = create_community_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True, enable_tool_call_context=True
         )
         track(server, "test_project", options)
@@ -230,7 +230,7 @@ class TestCommunityReportMissing:
     async def test_report_missing_with_null_values(self):
         """Test with null/None values for parameters."""
         server = create_community_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_community_test_client(server) as client:
@@ -256,7 +256,7 @@ class TestCommunityReportMissing:
 
         try:
             server = create_community_todo_server()
-            options = MCPCatOptions(enable_report_missing=True, enable_tracing=True)
+            options = AgentCatOptions(enable_report_missing=True, enable_tracing=True)
             track(server, "test_project", options)
 
             async with create_community_test_client(server) as client:
@@ -325,7 +325,7 @@ class TestCommunityReportMissing:
 
         try:
             server = create_community_todo_server()
-            options = MCPCatOptions(enable_report_missing=True, enable_tracing=True)
+            options = AgentCatOptions(enable_report_missing=True, enable_tracing=True)
             track(server, "test_project", options)
 
             async with create_community_test_client(server) as client:

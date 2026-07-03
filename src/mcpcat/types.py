@@ -1,4 +1,4 @@
-"""Type definitions for MCPCat."""
+"""Type definitions for AgentCat."""
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -167,8 +167,8 @@ ExporterConfig = Union[OTLPExporterConfig, DatadogExporterConfig, SentryExporter
 
 
 @dataclass
-class MCPCatOptions:
-    """Configuration options for MCPCat."""
+class AgentCatOptions:
+    """Configuration options for AgentCat."""
 
     enable_report_missing: bool = True
     enable_tracing: bool = True
@@ -189,11 +189,11 @@ class MCPCatOptions:
     disable_diagnostics: bool = False
     # Callback invoked on every auto-captured event (initialize, tools/list,
     # tools/call) to attach string key-value tags. Tags are intended for
-    # structured metadata you'll filter or group by in the MCPCat dashboard
+    # structured metadata you'll filter or group by in the AgentCat dashboard
     # (e.g. trace IDs, environments, regions). Validated client-side: keys
     # must be <=32 chars matching [a-zA-Z0-9$_.:\- ], values must be strings
     # <=200 chars without newlines, max 50 entries per event. Invalid entries
-    # are dropped with a warning logged to ~/mcpcat.log when debug_mode=True.
+    # are dropped with a warning logged to ~/agentcat.log when debug_mode=True.
     # May be sync or async. Receives the same (request, extra) arguments as
     # `identify`. If the callback raises or returns None/{}, tags are omitted.
     event_tags: EventTagsFunction | None = None
@@ -207,14 +207,14 @@ class MCPCatOptions:
 
 
 @dataclass
-class MCPCatData:
+class AgentCatData:
     """Internal data structure for tracking."""
 
     project_id: str | None
     session_id: str
     session_info: SessionInfo
     last_activity: datetime
-    options: MCPCatOptions
+    options: AgentCatOptions
 
     # Dynamic tracking fields (initialized on demand)
     tool_registry: Dict[str, ToolRegistration] = field(default_factory=dict)

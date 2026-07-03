@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
+from mcpcat import AgentCatOptions, track
 from mcpcat.modules.internal import (
     get_server_tracking_data,
     reset_all_tracking_data,
@@ -43,7 +43,7 @@ class TestCommunityTrackingTiming:
         server = FastMCP("empty-server")
 
         # Track the empty server first (disable report_missing to truly have no tools)
-        options = MCPCatOptions(enable_report_missing=False)
+        options = AgentCatOptions(enable_report_missing=False)
         track(server, "test-project", options)
 
         # Verify tracking is initialized even with no tools
@@ -96,7 +96,7 @@ class TestCommunityTrackingTiming:
             return f"Existing2: {x + 1}"
 
         # Track server with some tools (disable report_missing for cleaner counts)
-        options = MCPCatOptions(enable_report_missing=False)
+        options = AgentCatOptions(enable_report_missing=False)
         track(server, "test-project", options)
 
         # Test initial tools work (registered when list_tools or call_tool invoked)
@@ -175,7 +175,7 @@ class TestCommunityTrackingTiming:
             return f"D: {x - 5}"
 
         # Track server AFTER all tools added (disable report_missing for cleaner counts)
-        options = MCPCatOptions(enable_report_missing=False)
+        options = AgentCatOptions(enable_report_missing=False)
         track(server, "test-project", options)
 
         # Test all tools work correctly
@@ -210,7 +210,7 @@ class TestCommunityTrackingTiming:
         server = FastMCP("empty-with-options")
 
         # Track with options on empty server
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_tool_call_context=True,
             enable_report_missing=True,
             enable_tracing=True
@@ -286,7 +286,7 @@ class TestCommunityTrackingTiming:
             return f"Tool2: {x * 2}"
 
         # Third track call with options
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "project3", options)
 
         @server.tool
@@ -336,7 +336,7 @@ class TestCommunityTrackingTiming:
             return f"Step2: {x * 2}"
 
         # Track again with options
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test-project", options)
 
         # Add third and fourth tools
