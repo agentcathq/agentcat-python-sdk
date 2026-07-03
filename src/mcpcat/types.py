@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional, Set, TypedDict, Literal, Union, NotRequired
-from mcpcat_api import PublishEventRequest
+from agentcat_api import PublishEventRequest
 from pydantic import BaseModel
 
 from mcpcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
@@ -42,18 +42,21 @@ class SessionInfo(BaseModel):
 
     ip_address: Optional[str] = None
     sdk_language: Optional[str] = None
-    mcpcat_version: Optional[str] = None
+    agentcat_version: Optional[str] = None
     server_name: Optional[str] = None
     server_version: Optional[str] = None
     client_name: Optional[str] = None
     client_version: Optional[str] = None
-    identify_actor_given_id: Optional[str] = None  # Actor ID for mcpcat:identify events
-    identify_actor_name: Optional[str] = None  # Actor name for mcpcat:identify events
+    identify_actor_given_id: Optional[str] = None  # Actor ID for agentcat:identify events
+    identify_actor_name: Optional[str] = None  # Actor name for agentcat:identify events
     identify_data: Optional[dict[str, Any]] = None
 
 
 class Event(PublishEventRequest):
-    pass
+    # The generated client marks project_id as required on the wire, but the SDK
+    # constructs events before the project ID is known: event_queue merges it in
+    # at publish time, and telemetry-only mode sends events without one.
+    project_id: Optional[str] = None
 
 
 # Error tracking types
@@ -109,7 +112,7 @@ class EventType(str, Enum):
     MCP_RESOURCES_UNSUBSCRIBE = "mcp:resources/unsubscribe"
     MCP_TOOLS_CALL = "mcp:tools/call"
     MCP_TOOLS_LIST = "mcp:tools/list"
-    MCPCAT_IDENTIFY = "mcpcat:identify"
+    AGENTCAT_IDENTIFY = "agentcat:identify"
 
 
 class UnredactedEvent(Event):

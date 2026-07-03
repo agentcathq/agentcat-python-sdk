@@ -69,7 +69,7 @@ class OTLPExporter(Exporter):
                             {
                                 "scope": {
                                     "name": "mcpcat",
-                                    "version": event.mcpcat_version or "0.1.0",
+                                    "version": event.agentcat_version or "0.1.0",
                                 },
                                 "spans": [span],
                             }
@@ -153,11 +153,11 @@ class OTLPExporter(Exporter):
             {"key": "telemetry.sdk.name", "value": {"stringValue": "mcpcat-python"}}
         )
 
-        if event.mcpcat_version:
+        if event.agentcat_version:
             attributes.append(
                 {
                     "key": "telemetry.sdk.version",
-                    "value": {"stringValue": event.mcpcat_version},
+                    "value": {"stringValue": event.agentcat_version},
                 }
             )
 

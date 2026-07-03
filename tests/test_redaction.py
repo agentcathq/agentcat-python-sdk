@@ -310,13 +310,13 @@ class TestRedactEvent:
         assert result["metadata"]["ip"] == "[REDACTED]"
 
     def test_identify_event_special_fields(self):
-        """Test mcpcat:identify event with special protected fields."""
+        """Test agentcat:identify event with special protected fields."""
 
         def redact_fn(s: str) -> str:
             return "XXX"
 
         identify_event = {
-            "event_type": "mcpcat:identify",
+            "event_type": "agentcat:identify",
             "identify_actor_given_id": "user123",  # Protected
             "identify_actor_name": "John Doe",  # Protected
             "identify_data": {  # Protected

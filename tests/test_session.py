@@ -10,7 +10,7 @@ from freezegun import freeze_time
 from mcpcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
 from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
 from mcpcat.modules.session import (
-    get_mcpcat_version,
+    get_agentcat_version,
     get_server_session_id,
     get_session_info,
     new_session_id,
@@ -45,20 +45,20 @@ class TestNewSessionId:
 
 
 class TestGetMcpcatVersion:
-    """Test the get_mcpcat_version function."""
+    """Test the get_agentcat_version function."""
 
     @patch("importlib.metadata.version")
     def test_returns_correct_version(self, mock_version):
-        """Test that get_mcpcat_version returns the correct version."""
+        """Test that get_agentcat_version returns the correct version."""
         mock_version.return_value = "1.2.3"
-        assert get_mcpcat_version() == "1.2.3"
+        assert get_agentcat_version() == "1.2.3"
         mock_version.assert_called_once_with("mcpcat")
 
     @patch("importlib.metadata.version")
     def test_returns_none_on_exception(self, mock_version):
-        """Test that get_mcpcat_version returns None when an exception occurs."""
+        """Test that get_agentcat_version returns None when an exception occurs."""
         mock_version.side_effect = Exception("Package not found")
-        assert get_mcpcat_version() is None
+        assert get_agentcat_version() is None
 
 
 class TestGetSessionInfo:
@@ -77,7 +77,7 @@ class TestGetSessionInfo:
             session_info.sdk_language
             == f"Python {sys.version_info.major}.{sys.version_info.minor}"
         )
-        assert session_info.mcpcat_version == get_mcpcat_version()
+        assert session_info.agentcat_version == get_agentcat_version()
         assert session_info.server_name == "todo-server"
         assert (
             session_info.server_version is None

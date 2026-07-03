@@ -84,10 +84,10 @@ async def test_mcpcat_identify_self_event_published_per_request(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert identify_events, (
-            f"expected mcpcat:identify event, got "
+            f"expected agentcat:identify event, got "
             f"{[e.event_type for e in capture_queue]}"
         )
         assert identify_events[0].identify_actor_given_id == "bob"
@@ -153,7 +153,7 @@ async def test_identify_returning_none_yields_no_self_event(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert not identify_events, (
             f"identify returned None; should NOT publish self-event, got "

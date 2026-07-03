@@ -20,7 +20,7 @@ def new_session_id() -> str:
     return generate_prefixed_ksuid(SESSION_ID_PREFIX)
 
 
-def get_mcpcat_version() -> str | None:
+def get_agentcat_version() -> str | None:
     """Get the current MCPCat SDK version."""
     try:
         import importlib.metadata
@@ -148,7 +148,7 @@ def get_session_info(server: Server, data: MCPCatData | None = None) -> SessionI
     session_info = SessionInfo(
         ip_address=None,  # grab from django
         sdk_language=f"Python {sys.version_info.major}.{sys.version_info.minor}",
-        mcpcat_version=get_mcpcat_version(),
+        agentcat_version=get_agentcat_version(),
         server_name=server.name if hasattr(server, "name") else None,
         server_version=server.version if hasattr(server, "version") else None,
         client_name=data.session_info.client_name

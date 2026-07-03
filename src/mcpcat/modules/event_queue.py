@@ -13,7 +13,7 @@ from typing import Any, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
-from mcpcat_api import ApiClient, Configuration, EventsApi
+from agentcat_api import ApiClient, Configuration, EventsApi
 from mcpcat.modules.constants import EVENT_ID_PREFIX, MCPCAT_API_URL
 
 from ..types import Event, UnredactedEvent

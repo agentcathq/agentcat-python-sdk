@@ -71,10 +71,10 @@ async def test_mcpcat_identify_self_event_via_v3_middleware(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert identify_events, (
-            f"expected mcpcat:identify under v3, got "
+            f"expected agentcat:identify under v3, got "
             f"{[e.event_type for e in capture_queue]}"
         )
         assert identify_events[0].identify_actor_given_id == "v3-bob"

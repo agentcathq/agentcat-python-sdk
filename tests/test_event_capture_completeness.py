@@ -172,7 +172,7 @@ class TestEventCaptureCompleteness:
         # SDK info should be captured
         assert event.sdk_language is not None
         assert event.sdk_language.startswith("Python ")
-        assert event.mcpcat_version is not None  # Should be the installed version
+        assert event.agentcat_version is not None  # Should be the installed version
 
     @pytest.mark.asyncio
     async def test_event_contains_user_intent_from_context(self):
@@ -301,7 +301,7 @@ class TestEventCaptureCompleteness:
 
             # Session info fields
             assert event.sdk_language is not None
-            assert event.mcpcat_version is not None
+            assert event.agentcat_version is not None
             assert event.server_name == "todo-server"
             assert event.server_version == None
             assert event.client_name == "mcp"
@@ -415,7 +415,7 @@ class TestEventCaptureCompleteness:
         assert event.client_name == "test-client"
         assert event.client_version == "1.0.0"
         assert event.sdk_language is not None
-        assert event.mcpcat_version is not None
+        assert event.agentcat_version is not None
 
     @pytest.mark.asyncio
     async def test_identify_function_integration(self):
