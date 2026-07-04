@@ -8,6 +8,18 @@ from typing import Any
 
 __version__ = version("mcpcat")
 
+# FutureWarning (not DeprecationWarning): it must be visible by default to end
+# users of servers that embed this SDK, and it writes to stderr, which is safe
+# for stdio MCP transports.
+warnings.warn(
+    "The 'mcpcat' package has been renamed to 'agentcat'. This is the final "
+    "mcpcat release; it keeps working, but all new development ships in "
+    "'agentcat'. Migrate: pip install agentcat  (import agentcat; "
+    "agentcat.track(...)). See https://pypi.org/project/agentcat/",
+    FutureWarning,
+    stacklevel=2,
+)
+
 from mcpcat.modules.overrides.mcp_server import override_lowlevel_mcp_server
 from mcpcat.modules.session import get_session_info, new_session_id
 
