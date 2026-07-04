@@ -1,11 +1,11 @@
-"""Test utilities for MCPCat tests."""
+"""Test utilities for AgentCat tests."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-LOG_FILE = "mcpcat.log"
+LOG_FILE = "agentcat.log"
 
 
 def cleanup_log_file():

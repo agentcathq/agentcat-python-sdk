@@ -7,11 +7,11 @@ import time
 
 import pytest
 
-from mcpcat import MCPCatOptions
+from agentcat import AgentCatOptions
 
 
-def MCPCAT_OPTIONS_FACTORY() -> MCPCatOptions:
-    return MCPCatOptions(enable_tracing=True, stateless=True)
+def AGENTCAT_OPTIONS_FACTORY() -> AgentCatOptions:
+    return AgentCatOptions(enable_tracing=True, stateless=True)
 
 
 pytestmark = pytest.mark.e2e
@@ -53,7 +53,7 @@ async def test_v3_stateless_no_session_info_pollution(
     await asyncio.gather(call_once("a"), call_once("b"))
     time.sleep(0.7)
 
-    from mcpcat.modules.internal import get_server_tracking_data
+    from agentcat.modules.internal import get_server_tracking_data
 
     data = get_server_tracking_data(server)
     assert data is not None

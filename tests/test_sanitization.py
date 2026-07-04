@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from mcpcat.modules.sanitization import (
+from agentcat.modules.sanitization import (
     sanitize_event,
     _scan_for_base64,
     _AUDIO_REDACTED,
@@ -13,7 +13,7 @@ from mcpcat.modules.sanitization import (
     _IMAGE_REDACTED,
     _unsupported_type_redacted,
 )
-from mcpcat.types import UnredactedEvent
+from agentcat.types import UnredactedEvent
 
 
 def _make_event(**overrides) -> UnredactedEvent:

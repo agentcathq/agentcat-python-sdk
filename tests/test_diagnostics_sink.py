@@ -1,6 +1,6 @@
 """Tests for the diagnostics sink hook in logging.write_to_log."""
 
-from mcpcat.modules.logging import (
+from agentcat.modules.logging import (
     set_debug_mode,
     set_diagnostics_sink,
     write_to_log,

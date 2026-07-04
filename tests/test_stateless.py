@@ -3,15 +3,15 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import mcpcat
-from mcpcat.modules.internal import (
+import agentcat
+from agentcat.modules.internal import (
     get_server_tracking_data,
     set_server_tracking_data,
     reset_all_tracking_data,
 )
-from mcpcat.modules.session import get_server_session_id, get_client_info_from_request_context
-from mcpcat.modules.identify import identify_session
-from mcpcat.types import MCPCatData, MCPCatOptions, SessionInfo, UserIdentity
+from agentcat.modules.session import get_server_session_id, get_client_info_from_request_context
+from agentcat.modules.identify import identify_session
+from agentcat.types import AgentCatData, AgentCatOptions, SessionInfo, UserIdentity
 
 from .test_utils.todo_server import create_todo_server
 
@@ -34,11 +34,11 @@ class TestStatelessMode:
         reset_all_tracking_data()
 
     def _setup_data(self, stateless=False, identify=None):
-        """Create and store MCPCatData on the server."""
-        options = MCPCatOptions()
+        """Create and store AgentCatData on the server."""
+        options = AgentCatOptions()
         if identify:
             options.identify = identify
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="test_project",
             session_id="ses_existing123",
             session_info=SessionInfo(),
@@ -50,7 +50,7 @@ class TestStatelessMode:
         return data
 
     def test_stateless_option_sets_flag(self):
-        """MCPCatOptions(stateless=True) should set is_stateless on data."""
+        """AgentCatOptions(stateless=True) should set is_stateless on data."""
         data = self._setup_data(stateless=True)
         assert data.is_stateless is True
 
@@ -60,7 +60,7 @@ class TestStatelessMode:
         session_id = get_server_session_id(self.server)
         assert session_id is None
 
-    @patch("mcpcat.modules.identify.event_queue")
+    @patch("agentcat.modules.identify.event_queue")
     def test_stateless_identify_runs_every_time(self, mock_event_queue):
         """In stateless mode, identify should run on every call (no early-return guard)."""
         mock_fn = MagicMock(return_value=UserIdentity(
@@ -73,7 +73,7 @@ class TestStatelessMode:
 
         assert mock_fn.call_count == 2
 
-    @patch("mcpcat.modules.identify.event_queue")
+    @patch("agentcat.modules.identify.event_queue")
     def test_stateless_identify_returns_identity(self, mock_event_queue):
         """In stateless mode, identify_session() should return the UserIdentity."""
         self._setup_data(stateless=True, identify=_make_identify_fn())
@@ -84,7 +84,7 @@ class TestStatelessMode:
         assert result.user_id == "user_123"
         assert result.user_name == "Test User"
 
-    @patch("mcpcat.modules.identify.event_queue")
+    @patch("agentcat.modules.identify.event_queue")
     def test_stateful_identify_runs_every_time(self, mock_event_queue):
         """Stateful mode runs identify on every request."""
         mock_fn = MagicMock(return_value=UserIdentity(
@@ -105,8 +105,8 @@ class TestStatelessMode:
     def test_track_stateless_true_sets_flag(self):
         """track() with stateless=True should set is_stateless on data."""
         server = create_todo_server()
-        options = MCPCatOptions(stateless=True)
-        mcpcat.track(server, "test_project", options)
+        options = AgentCatOptions(stateless=True)
+        agentcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         assert data.is_stateless is True
 
@@ -116,21 +116,21 @@ class TestStatelessMode:
         # Mock the server to look stateless
         server.settings = MagicMock()
         server.settings.stateless_http = True
-        options = MCPCatOptions(stateless=False)
-        mcpcat.track(server, "test_project", options)
+        options = AgentCatOptions(stateless=False)
+        agentcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         assert data.is_stateless is False
 
     def test_track_stateless_none_auto_detects(self):
         """track() with stateless=None (default) should auto-detect from server."""
         server = create_todo_server()
-        options = MCPCatOptions()  # stateless=None by default
-        mcpcat.track(server, "test_project", options)
+        options = AgentCatOptions()  # stateless=None by default
+        agentcat.track(server, "test_project", options)
         data = get_server_tracking_data(server)
         # create_todo_server() is not stateless, so should be False
         assert data.is_stateless is False
 
-    @patch("mcpcat.modules.identify.event_queue")
+    @patch("agentcat.modules.identify.event_queue")
     def test_stateless_identify_bad_return(self, mock_event_queue):
         """In stateless mode, identify returning non-UserIdentity should return None."""
         bad_fn = MagicMock(return_value="not a UserIdentity")
@@ -141,7 +141,7 @@ class TestStatelessMode:
         assert result is None
         assert bad_fn.call_count == 1
 
-    @patch("mcpcat.modules.identify.event_queue")
+    @patch("agentcat.modules.identify.event_queue")
     def test_stateless_identify_exception(self, mock_event_queue):
         """In stateless mode, identify raising should return None, not propagate."""
         raising_fn = MagicMock(side_effect=RuntimeError("identify exploded"))

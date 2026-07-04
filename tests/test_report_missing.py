@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock
 import time
 
-from mcpcat import MCPCatOptions, track
+from agentcat import AgentCatOptions, track
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -20,7 +20,7 @@ class TestReportMissing:
         server = create_todo_server()
 
         # Track the server with report_missing enabled
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         # Use client to list all tools and verify report_missing is injected
@@ -45,7 +45,7 @@ class TestReportMissing:
         server = create_todo_server()
 
         # Track with report_missing disabled
-        options = MCPCatOptions(enable_report_missing=False)
+        options = AgentCatOptions(enable_report_missing=False)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -61,7 +61,7 @@ class TestReportMissing:
     async def test_report_missing_tool_call_success(self):
         """Call report_missing tool and verify it executes successfully."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -80,7 +80,7 @@ class TestReportMissing:
     async def test_report_missing_with_valid_params(self):
         """Test with both required parameters (missing_tool, description)."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -106,7 +106,7 @@ class TestReportMissing:
     async def test_report_missing_with_missing_params(self):
         """Test error handling when required parameters are missing."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -125,7 +125,7 @@ class TestReportMissing:
     async def test_report_missing_with_extra_params(self):
         """Test that extra parameters are ignored/handled properly."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -144,7 +144,7 @@ class TestReportMissing:
     async def test_report_missing_with_other_tools(self):
         """Verify report_missing doesn't interfere with existing server tools."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -166,7 +166,7 @@ class TestReportMissing:
     async def test_multiple_report_missing_calls(self):
         """Test calling report_missing multiple times in succession."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -192,7 +192,7 @@ class TestReportMissing:
     async def test_report_missing_with_context_enabled(self):
         """Test interaction when both report_missing and tool_context are enabled."""
         server = create_todo_server()
-        options = MCPCatOptions(
+        options = AgentCatOptions(
             enable_report_missing=True, enable_tool_call_context=True
         )
         track(server, "test_project", options)
@@ -233,7 +233,7 @@ class TestReportMissing:
     async def test_report_missing_with_null_values(self):
         """Test with null/None values for parameters."""
         server = create_todo_server()
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -246,7 +246,7 @@ class TestReportMissing:
     @pytest.mark.asyncio
     async def test_report_missing_publishes_event(self):
         """Verify that calling report_missing tool publishes an event to the queue."""
-        from mcpcat.modules.event_queue import EventQueue, set_event_queue
+        from agentcat.modules.event_queue import EventQueue, set_event_queue
 
         # Create a mock API client
         mock_api_client = MagicMock()
@@ -260,7 +260,7 @@ class TestReportMissing:
 
         try:
             server = create_todo_server()
-            options = MCPCatOptions(enable_report_missing=True, enable_tracing=True)
+            options = AgentCatOptions(enable_report_missing=True, enable_tracing=True)
             track(server, "test_project", options)
 
             async with create_test_client(server) as client:
@@ -307,14 +307,14 @@ class TestReportMissing:
 
         finally:
             # Clean up: restore original event queue
-            from mcpcat.modules.event_queue import EventQueue, set_event_queue
+            from agentcat.modules.event_queue import EventQueue, set_event_queue
 
             set_event_queue(EventQueue())
 
     @pytest.mark.asyncio
     async def test_multiple_tool_calls_publish_multiple_events(self):
         """Verify that multiple tool calls result in multiple events being published."""
-        from mcpcat.modules.event_queue import EventQueue, set_event_queue
+        from agentcat.modules.event_queue import EventQueue, set_event_queue
 
         # Create a mock API client
         mock_api_client = MagicMock()
@@ -328,7 +328,7 @@ class TestReportMissing:
 
         try:
             server = create_todo_server()
-            options = MCPCatOptions(enable_report_missing=True, enable_tracing=True)
+            options = AgentCatOptions(enable_report_missing=True, enable_tracing=True)
             track(server, "test_project", options)
 
             async with create_test_client(server) as client:
@@ -396,6 +396,6 @@ class TestReportMissing:
 
         finally:
             # Clean up: restore original event queue
-            from mcpcat.modules.event_queue import EventQueue, set_event_queue
+            from agentcat.modules.event_queue import EventQueue, set_event_queue
 
             set_event_queue(EventQueue())

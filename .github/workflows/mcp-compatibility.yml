@@ -187,7 +187,7 @@ jobs:
         uv venv
 
         # Install base dependencies first
-        uv pip install pydantic>=2.0.0 requests>=2.31.0 mcpcat-api==0.1.4
+        uv pip install pydantic>=2.0.0 requests>=2.31.0 agentcat-api==1.0.0
 
         # Install the specific MCP version
         uv pip install "mcp==${{ matrix.mcp-version }}"
@@ -397,11 +397,11 @@ jobs:
         if failing_fastmcp:
             subject_parts.append('FastMCP ' + ', '.join(failing_fastmcp))
         subject_suffix = ' | '.join(subject_parts) if subject_parts else 'See workflow logs'
-        subject_line = f'🚨 MCPCat Compatibility Tests Failed - {subject_suffix}'
+        subject_line = f'🚨 AgentCat Compatibility Tests Failed - {subject_suffix}'
         print(f'Email subject suffix: {subject_suffix}')
 
         email_html = f'''
-        <h2>🚨 MCPCat Compatibility Tests Failed</h2>
+        <h2>🚨 AgentCat Compatibility Tests Failed</h2>
 
         <p>The MCP/FastMCP compatibility tests have failed in the main workflow. This requires immediate attention.</p>
 
@@ -442,7 +442,7 @@ jobs:
         repo_tag = '${{ github.repository }}'.replace('/', '_')
 
         params = {
-            'from': 'no-reply@mcpcat.io',  # Use Resend's default verified domain
+            'from': 'no-reply@agentcat.com',  # Requires agentcat.com verified in Resend (rebrand Phase 1)
             'to': [alert_email],  # Use variable, not inline secret
             'subject': subject_line,
             'html': email_html,
@@ -494,7 +494,7 @@ jobs:
         echo "     MCP VERSION COMPATIBILITY REPORT    "
         echo "=========================================="
         echo ""
-        echo "This report shows the compatibility status of MCPCat with different MCP and FastMCP versions."
+        echo "This report shows the compatibility status of AgentCat with different MCP and FastMCP versions."
         echo ""
         echo "Generated on: $(date)"
         echo ""
@@ -521,8 +521,8 @@ jobs:
         echo ""
         echo "📦 INSTALLATION OPTIONS"
         echo "─────────────────────────────────────────"
-        echo "• pip install mcpcat          - Official MCP only (includes mcp.server.fastmcp)"
-        echo "• pip install mcpcat[community] - Adds community FastMCP support"
+        echo "• pip install agentcat          - Official MCP only (includes mcp.server.fastmcp)"
+        echo "• pip install agentcat[community] - Adds community FastMCP support"
         echo ""
         echo "📊 RESULTS"
         echo "─────────────────────────────────────────"

@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcpcat.modules import diagnostics
-from mcpcat.modules.logging import write_to_log
+from agentcat.modules import diagnostics
+from agentcat.modules.logging import write_to_log
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def test_flush_posts_otlp_shaped_json():
     diagnostics.init_diagnostics("proj_1")
     write_to_log("Warning: something happened")
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
 
         mock_post.assert_called_once()
@@ -40,7 +40,7 @@ def test_flush_posts_otlp_shaped_json():
             a["key"]: a["value"]["stringValue"]
             for a in payload["resourceLogs"][0]["resource"]["attributes"]
         }
-        assert resource_attrs.get("mcpcat.project_id") == "proj_1"
+        assert resource_attrs.get("agentcat.project_id") == "proj_1"
 
 
 def test_flush_swallows_post_errors():
@@ -48,7 +48,7 @@ def test_flush_swallows_post_errors():
     write_to_log("some log line")
 
     with patch(
-        "mcpcat.modules.diagnostics.requests.post",
+        "agentcat.modules.diagnostics.requests.post",
         side_effect=RuntimeError("network down"),
     ):
         # Must not raise.
@@ -59,7 +59,7 @@ def test_no_post_when_disabled():
     diagnostics.init_diagnostics("proj_1", disabled=True)
     write_to_log("ignored")
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
         mock_post.assert_not_called()
 
@@ -67,6 +67,6 @@ def test_no_post_when_disabled():
 def test_no_post_when_buffer_empty():
     diagnostics.init_diagnostics("proj_1")
 
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
         mock_post.assert_not_called()

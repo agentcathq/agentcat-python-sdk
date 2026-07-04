@@ -1,6 +1,6 @@
 """Identify-per-event behavior over real Streamable HTTP.
 
-Tests mutate the running server's MCPCatData.options.identify to vary the hook
+Tests mutate the running server's AgentCatData.options.identify to vary the hook
 per scenario. The default options-factory is tracing-only with no identify;
 identify-swapping on the live server matches the pattern used by
 tests/test_stateless.py.
@@ -17,8 +17,8 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from mcpcat.modules.internal import get_server_tracking_data
-from mcpcat.types import UserIdentity
+from agentcat.modules.internal import get_server_tracking_data
+from agentcat.types import UserIdentity
 
 
 pytestmark = pytest.mark.e2e
@@ -65,7 +65,7 @@ async def test_identify_hook_receives_real_request_extra(
 
 
 @pytest.mark.asyncio
-async def test_mcpcat_identify_self_event_published_per_request(
+async def test_agentcat_identify_self_event_published_per_request(
     official_http_server, capture_queue
 ):
     url, server = official_http_server
@@ -84,10 +84,10 @@ async def test_mcpcat_identify_self_event_published_per_request(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert identify_events, (
-            f"expected mcpcat:identify event, got "
+            f"expected agentcat:identify event, got "
             f"{[e.event_type for e in capture_queue]}"
         )
         assert identify_events[0].identify_actor_given_id == "bob"
@@ -153,7 +153,7 @@ async def test_identify_returning_none_yields_no_self_event(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert not identify_events, (
             f"identify returned None; should NOT publish self-event, got "

@@ -1,14 +1,14 @@
-# Contributing to MCPcat 🎉
+# Contributing to AgentCat 🎉
 
-Thank you for your interest in contributing to MCPcat! We're excited to have you join our community of developers building analytics tools for MCP servers.
+Thank you for your interest in contributing to AgentCat! We're excited to have you join our community of developers building analytics tools for MCP servers.
 
 ## Getting Started
 
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR-USERNAME/mcpcat-python-sdk.git
-   cd mcpcat-python-sdk
+   git clone https://github.com/YOUR-USERNAME/agentcat-python-sdk.git
+   cd agentcat-python-sdk
    ```
 3. **Install dependencies** using uv:
    ```bash
@@ -80,7 +80,7 @@ git commit -m "docs: update API documentation"
    - Why these changes are needed
    - Any relevant context or screenshots
 
-4. **Wait for review** - The MCPcat team will review your PR within 2 business days
+4. **Wait for review** - The AgentCat team will review your PR within 2 business days
 
 5. **Address feedback** if any changes are requested
 
@@ -92,7 +92,7 @@ You don't need to open an issue before submitting a PR. Feel free to submit pull
 
 ## Good First Issues
 
-Looking for a place to start? Check out issues labeled [`good first issue`](https://github.com/MCPCat/mcpcat-python-sdk/labels/good%20first%20issue) - these are great for newcomers to the codebase.
+Looking for a place to start? Check out issues labeled [`good first issue`](https://github.com/agentcathq/agentcat-python-sdk/labels/good%20first%20issue) - these are great for newcomers to the codebase.
 
 ## Testing
 
@@ -116,7 +116,7 @@ uv run ruff check .
 uv run ruff format .
 
 # Type checking (if applicable)
-uv run mypy src/mcpcat --ignore-missing-imports
+uv run mypy src/agentcat --ignore-missing-imports
 ```
 
 Our CI will run these same checks on your PR.
@@ -133,9 +133,9 @@ While we don't restrict adding new dependencies, they are generally **discourage
 ## Project Structure
 
 ```
-mcpcat-python-sdk/
+agentcat-python-sdk/
 ├── src/           # Source code
-│   └── mcpcat/    # Main package
+│   └── agentcat/  # Main package
 │       ├── modules/      # Core modules
 │       ├── thirdparty/   # Vendored dependencies
 │       ├── types.py      # Type definitions
@@ -149,22 +149,22 @@ mcpcat-python-sdk/
 ## Community
 
 - **Discord**: Join our [Discord server](https://discord.gg/n9qpyhzp2u) for discussions
-- **Documentation**: Visit [docs.mcpcat.io](https://docs.mcpcat.io) for detailed guides
-- **Issues**: Browse [open issues](https://github.com/MCPCat/mcpcat-python-sdk/issues) for areas needing help
+- **Documentation**: Visit [docs.agentcat.com](https://docs.agentcat.com) for detailed guides
+- **Issues**: Browse [open issues](https://github.com/agentcathq/agentcat-python-sdk/issues) for areas needing help
 
 ## Versioning
 
-The MCPcat team handles versioning and releases. Your contributions will be included in the next appropriate release based on semantic versioning principles.
+The AgentCat team handles versioning and releases. Your contributions will be included in the next appropriate release based on semantic versioning principles.
 
 ## Recognition
 
-All contributors are recognized in our repository. Your contributions help make MCPcat better for everyone building MCP servers!
+All contributors are recognized in our repository. Your contributions help make AgentCat better for everyone building MCP servers!
 
 ## Questions?
 
 If you have questions about contributing, feel free to:
 
 - Ask in our [Discord server](https://discord.gg/n9qpyhzp2u)
-- Open a [discussion](https://github.com/MCPCat/mcpcat-python-sdk/discussions) on GitHub
+- Open a [discussion](https://github.com/agentcathq/agentcat-python-sdk/discussions) on GitHub
 
-Thank you for contributing to MCPcat! 🐱
+Thank you for contributing to AgentCat! 🐱

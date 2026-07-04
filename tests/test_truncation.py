@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.truncation import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.truncation import (
     _truncate_value,
     truncate_event,
     MAX_STRING_BYTES,
@@ -17,7 +17,7 @@ from mcpcat.modules.truncation import (
     MIN_DEPTH,
     TRUNCATABLE_FIELDS,
 )
-from mcpcat.types import UnredactedEvent
+from agentcat.types import UnredactedEvent
 
 
 def _make_event(**overrides) -> UnredactedEvent:
@@ -45,7 +45,7 @@ class TestStringTruncation:
         original = "a" * (MAX_STRING_BYTES + 500)
         result = _truncate_value(original)
         byte_size = len(original.encode("utf-8"))
-        expected_suffix = f"[string truncated by MCPcat from {byte_size} bytes]"
+        expected_suffix = f"[string truncated by AgentCat from {byte_size} bytes]"
         assert result.endswith(expected_suffix)
         assert len(result.encode("utf-8")) < len(original.encode("utf-8"))
 
@@ -54,7 +54,7 @@ class TestStringTruncation:
         s = "\U0001f600" * 2561  # 10,244 bytes — just over limit
         result = _truncate_value(s)
         byte_size = len(s.encode("utf-8"))
-        assert f"[string truncated by MCPcat from {byte_size} bytes]" in result
+        assert f"[string truncated by AgentCat from {byte_size} bytes]" in result
         # Verify valid UTF-8 — would raise if broken
         result.encode("utf-8")
 
@@ -86,7 +86,7 @@ class TestDepthLimiting:
             inner = inner["nested"]
         # The dict at the limit is kept, but its nested children are markers
         assert isinstance(inner, dict)
-        assert inner["nested"] == f"[nested content truncated by MCPcat at depth {MAX_DEPTH}]"
+        assert inner["nested"] == f"[nested content truncated by AgentCat at depth {MAX_DEPTH}]"
 
     def test_max_depth_zero_preserves_top_level_mapping(self):
         value = {
@@ -96,7 +96,7 @@ class TestDepthLimiting:
         result = _truncate_value(value, max_depth=0)
         assert isinstance(result, dict)
         assert result["event_type"] == "mcp:tools/call"
-        assert result["parameters"] == "[nested content truncated by MCPcat at depth 0]"
+        assert result["parameters"] == "[nested content truncated by AgentCat at depth 0]"
 
 
 class TestBreadthLimiting:
@@ -112,7 +112,7 @@ class TestBreadthLimiting:
         result = _truncate_value(d)
         assert len(result) == MAX_BREADTH + 1  # MAX_BREADTH items + 1 marker
         assert "__truncated__" in result
-        assert "5 more items truncated by MCPcat" in result["__truncated__"]
+        assert "5 more items truncated by AgentCat" in result["__truncated__"]
 
     def test_list_at_breadth_limit_unchanged(self):
         lst = list(range(MAX_BREADTH))
@@ -123,7 +123,7 @@ class TestBreadthLimiting:
         lst = list(range(MAX_BREADTH + 30))
         result = _truncate_value(lst)
         assert len(result) == MAX_BREADTH + 1  # MAX_BREADTH items + 1 marker string
-        assert "30 more items truncated by MCPcat" in result[-1]
+        assert "30 more items truncated by AgentCat" in result[-1]
 
 
 class TestCircularReferences:
@@ -168,25 +168,25 @@ class TestTruncateEventOversized:
         assert result is not event
         # The big string should be truncated
         assert len(result.parameters["data"]) < len(big)
-        assert "truncated by MCPcat" in result.parameters["data"]
+        assert "truncated by AgentCat" in result.parameters["data"]
 
     def test_large_string_in_response_truncated(self):
         big = "x" * 200_000
         event = _make_event(response={"output": big})
         result = truncate_event(event)
-        assert "truncated by MCPcat" in result.response["output"]
+        assert "truncated by AgentCat" in result.response["output"]
 
     def test_large_string_in_error_truncated(self):
         big = "x" * 200_000
         event = _make_event(error={"message": "fail", "stack": big})
         result = truncate_event(event)
-        assert "truncated by MCPcat" in result.error["stack"]
+        assert "truncated by AgentCat" in result.error["stack"]
 
     def test_large_identify_data_truncated(self):
         big = "x" * 200_000
         event = _make_event(identify_data={"bio": big})
         result = truncate_event(event)
-        assert "truncated by MCPcat" in result.identify_data["bio"]
+        assert "truncated by AgentCat" in result.identify_data["bio"]
 
     def test_original_event_not_mutated(self):
         big = "x" * 200_000
@@ -272,7 +272,7 @@ class TestTruncateEventErrorHandling:
         big = "x" * 200_000
         event = _make_event(parameters={"data": big})
         with patch(
-            "mcpcat.modules.truncation._truncate_value",
+            "agentcat.modules.truncation._truncate_value",
             side_effect=RuntimeError("boom"),
         ):
             result = truncate_event(event)
@@ -286,7 +286,7 @@ class TestPipelineIntegration:
     def test_truncation_is_imported_in_event_queue(self):
         """Verify truncate_event is used in event_queue module."""
         import inspect
-        from mcpcat.modules.event_queue import EventQueue
+        from agentcat.modules.event_queue import EventQueue
         source = inspect.getsource(EventQueue._process_event)
         assert "truncate_event" in source
 
@@ -296,7 +296,7 @@ class TestTruncationWithTodoServer:
 
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
         yield
         set_event_queue(original_queue)
 
@@ -321,7 +321,7 @@ class TestTruncationWithTodoServer:
         captured_events = self._capture_setup()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Use varied text so the sanitizer doesn't flag it as binary data
@@ -342,7 +342,7 @@ class TestTruncationWithTodoServer:
         # The parameter string should have been truncated
         captured_text = event.parameters["arguments"]["text"]
         assert len(captured_text) < len(oversized_text)
-        assert "truncated by MCPcat" in captured_text
+        assert "truncated by AgentCat" in captured_text
 
         # Whole event must fit within the size limit
         event_bytes = len(event.model_dump_json().encode("utf-8"))
@@ -357,7 +357,7 @@ class TestTruncationWithTodoServer:
         captured_events = self._capture_setup()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Add many todos so list_todos returns a large response
@@ -392,7 +392,7 @@ class TestMegabyteStrings:
         assert result is not event
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES
-        assert "truncated by MCPcat" in result.user_intent
+        assert "truncated by AgentCat" in result.user_intent
 
     def test_1mb_in_parameters(self):
         event = _make_event(parameters={"context": self.ONE_MB})
@@ -400,21 +400,21 @@ class TestMegabyteStrings:
         assert result is not event
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES
-        assert "truncated by MCPcat" in result.parameters["context"]
+        assert "truncated by AgentCat" in result.parameters["context"]
 
     def test_1mb_in_response(self):
         event = _make_event(response={"output": self.ONE_MB})
         result = truncate_event(event)
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES
-        assert "truncated by MCPcat" in result.response["output"]
+        assert "truncated by AgentCat" in result.response["output"]
 
     def test_1mb_in_error(self):
         event = _make_event(error={"message": "fail", "stack": self.ONE_MB})
         result = truncate_event(event)
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES
-        assert "truncated by MCPcat" in result.error["stack"]
+        assert "truncated by AgentCat" in result.error["stack"]
 
     def test_1mb_in_all_fields_simultaneously(self):
         event = _make_event(
@@ -537,7 +537,7 @@ class TestMetadataProtection:
         assert result.user_intent == "short intent"
 
         # Payload was truncated
-        assert "truncated by MCPcat" in result.parameters["data"]
+        assert "truncated by AgentCat" in result.parameters["data"]
 
         # Still under size limit
         result_bytes = len(result.model_dump_json().encode("utf-8"))
@@ -554,6 +554,6 @@ class TestMetadataProtection:
         result = truncate_event(event)
         assert result.event_type == "mcp:tools/call"
         assert result.resource_name == "my_tool"
-        assert "truncated by MCPcat" in result.user_intent
+        assert "truncated by AgentCat" in result.user_intent
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES

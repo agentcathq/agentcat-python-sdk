@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcpcat.modules.compatibility import is_compatible_server
+from agentcat.modules.compatibility import is_compatible_server
 from mcp import ClientSession
 
 from .test_utils.client import create_test_client

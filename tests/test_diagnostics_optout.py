@@ -8,7 +8,7 @@ set just the relevant marker.
 
 import pytest
 
-from mcpcat.modules import diagnostics
+from agentcat.modules import diagnostics
 
 
 @pytest.fixture(autouse=True)

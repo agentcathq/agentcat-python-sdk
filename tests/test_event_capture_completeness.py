@@ -6,10 +6,10 @@ import time
 from datetime import datetime, timezone
 
 from mcp import Implementation
-from mcpcat import MCPCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
-from mcpcat.types import UserIdentity
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
+from agentcat.types import UserIdentity
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -22,7 +22,7 @@ class TestEventCaptureCompleteness:
     def setup_and_teardown(self):
         """Set up and tear down for each test."""
         # Store original event queue
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
 
         yield
         # Restore original event queue after test
@@ -46,7 +46,7 @@ class TestEventCaptureCompleteness:
 
         # Create and track server
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -93,7 +93,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Create client with default info
@@ -126,7 +126,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -144,7 +144,7 @@ class TestEventCaptureCompleteness:
 
     @pytest.mark.asyncio
     async def test_event_contains_sdk_info(self):
-        """Test that events capture SDK language and MCPCat version."""
+        """Test that events capture SDK language and AgentCat version."""
         mock_api_client = MagicMock()
         captured_events = []
 
@@ -157,7 +157,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -172,7 +172,7 @@ class TestEventCaptureCompleteness:
         # SDK info should be captured
         assert event.sdk_language is not None
         assert event.sdk_language.startswith("Python ")
-        assert event.mcpcat_version is not None  # Should be the installed version
+        assert event.agentcat_version is not None  # Should be the installed version
 
     @pytest.mark.asyncio
     async def test_event_contains_user_intent_from_context(self):
@@ -189,7 +189,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tracing=True, enable_tool_call_context=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -242,7 +242,7 @@ class TestEventCaptureCompleteness:
             )
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, identify=identify_fn)
+        options = AgentCatOptions(enable_tracing=True, identify=identify_fn)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -277,7 +277,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -301,7 +301,7 @@ class TestEventCaptureCompleteness:
 
             # Session info fields
             assert event.sdk_language is not None
-            assert event.mcpcat_version is not None
+            assert event.agentcat_version is not None
             assert event.server_name == "todo-server"
             assert event.server_version == None
             assert event.client_name == "mcp"
@@ -322,7 +322,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -357,7 +357,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -392,7 +392,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         # Creating the client triggers initialization
@@ -415,7 +415,7 @@ class TestEventCaptureCompleteness:
         assert event.client_name == "test-client"
         assert event.client_version == "1.0.0"
         assert event.sdk_language is not None
-        assert event.mcpcat_version is not None
+        assert event.agentcat_version is not None
 
     @pytest.mark.asyncio
     async def test_identify_function_integration(self):
@@ -444,7 +444,7 @@ class TestEventCaptureCompleteness:
             return None
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True, identify=custom_identify)
+        options = AgentCatOptions(enable_tracing=True, identify=custom_identify)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -484,7 +484,7 @@ class TestEventCaptureCompleteness:
         set_event_queue(test_queue)
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:

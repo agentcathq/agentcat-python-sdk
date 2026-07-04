@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.event_queue import EventQueue, set_event_queue
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def capture_queue() -> List[Any]:
     Yields the list of captured PublishEventRequest objects. Tests assert on
     its contents after the in-flight HTTP round-trip plus a short settle.
     """
-    from mcpcat.modules.event_queue import event_queue as original
+    from agentcat.modules.event_queue import event_queue as original
 
     captured: List[Any] = []
     mock = MagicMock()

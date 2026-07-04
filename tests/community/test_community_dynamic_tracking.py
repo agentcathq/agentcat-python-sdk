@@ -3,13 +3,13 @@
 
 import pytest
 
-from mcpcat import track
-from mcpcat.modules.internal import (
+from agentcat import track
+from agentcat.modules.internal import (
     get_server_tracking_data,
     get_tool_timeline,
     reset_all_tracking_data,
 )
-from mcpcat.types import MCPCatOptions
+from agentcat.types import AgentCatOptions
 
 from ..test_utils.community_client import create_community_test_client
 from ..test_utils.community_todo_server import (
@@ -184,7 +184,7 @@ class TestCommunityDynamicTracking:
             return str(x)
 
         # Enable tracking
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(server, "test-project", options)
 
         # Register second tool
@@ -230,7 +230,7 @@ class TestCommunityDynamicTracking:
         server = FastMCP("test-server")
 
         # Enable tracking with context
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(server, "test-project", options)
 
         # Add tool after tracking
@@ -281,7 +281,7 @@ class TestCommunityDynamicTracking:
         server = FastMCP("test-server")
 
         # Enable tracking with report_missing
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(server, "test-project", options)
 
         # Test calling get_more_tools
@@ -321,7 +321,7 @@ class TestCommunityDynamicTracking:
         server2 = FastMCP("server2")
 
         # Track both servers
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(server1, "project1", options)
         track(server2, "project2", options)
 
@@ -362,7 +362,7 @@ class TestCommunityDynamicTracking:
         server = create_community_todo_server()
 
         # Enable tracking
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(server, "test-project", options)
 
         # Test existing tools work correctly

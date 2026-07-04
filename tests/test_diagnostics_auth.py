@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcpcat.modules import diagnostics
-from mcpcat.modules.logging import write_to_log
+from agentcat.modules import diagnostics
+from agentcat.modules.logging import write_to_log
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,7 @@ def reset(monkeypatch):
 
 def _flush_and_get_headers() -> dict:
     write_to_log("a log line")
-    with patch("mcpcat.modules.diagnostics.requests.post") as mock_post:
+    with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
         diagnostics.flush_diagnostics()
         mock_post.assert_called_once()
         return mock_post.call_args.kwargs["headers"]

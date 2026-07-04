@@ -7,8 +7,8 @@ from typing import Any, Optional
 
 import pytest
 
-from mcpcat.modules.internal import get_server_tracking_data
-from mcpcat.types import UserIdentity
+from agentcat.modules.internal import get_server_tracking_data
+from agentcat.types import UserIdentity
 
 
 pytestmark = pytest.mark.e2e
@@ -51,7 +51,7 @@ async def test_identify_hook_runs_under_v3_middleware(
 
 
 @pytest.mark.asyncio
-async def test_mcpcat_identify_self_event_via_v3_middleware(
+async def test_agentcat_identify_self_event_via_v3_middleware(
     v3_http_server, capture_queue
 ):
     from fastmcp import Client
@@ -71,10 +71,10 @@ async def test_mcpcat_identify_self_event_via_v3_middleware(
 
         time.sleep(0.5)
         identify_events = [
-            e for e in capture_queue if e.event_type == "mcpcat:identify"
+            e for e in capture_queue if e.event_type == "agentcat:identify"
         ]
         assert identify_events, (
-            f"expected mcpcat:identify under v3, got "
+            f"expected agentcat:identify under v3, got "
             f"{[e.event_type for e in capture_queue]}"
         )
         assert identify_events[0].identify_actor_given_id == "v3-bob"

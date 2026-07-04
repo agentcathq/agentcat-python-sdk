@@ -9,9 +9,9 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server import Server
 from mcp import Tool
 
-from mcpcat import track
-from mcpcat.types import MCPCatOptions
-from mcpcat.modules.internal import (
+from agentcat import track
+from agentcat.types import AgentCatOptions
+from agentcat.modules.internal import (
     get_server_tracking_data,
     reset_all_tracking_data,
     get_tool_timeline,
@@ -150,7 +150,7 @@ class TestDynamicTracking:
             return str(x)
 
         # Enable tracking
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(fastmcp_server, "test-project", options)
 
         # Register second tool
@@ -188,7 +188,7 @@ class TestDynamicTracking:
     async def test_context_injection_with_dynamic_tracking(self, fastmcp_server):
         """Test that context injection works with dynamic tracking and tool still functions."""
         # Enable tracking with context
-        options = MCPCatOptions(enable_tool_call_context=True)
+        options = AgentCatOptions(enable_tool_call_context=True)
         track(fastmcp_server, "test-project", options)
 
         # Add tool after tracking
@@ -234,7 +234,7 @@ class TestDynamicTracking:
     async def test_report_missing_tool_with_dynamic_tracking(self, fastmcp_server):
         """Test that the get_more_tools tool is added with dynamic tracking and works correctly."""
         # Enable tracking with report_missing
-        options = MCPCatOptions(enable_report_missing=True)
+        options = AgentCatOptions(enable_report_missing=True)
         track(fastmcp_server, "test-project", options)
 
         # List tools
@@ -287,7 +287,7 @@ class TestDynamicTracking:
             raise ValueError(f"Unknown tool: {name}")
 
         # Enable dynamic tracking
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(lowlevel_server, "test-project", options)
 
         # List tools to trigger tracking
@@ -320,7 +320,7 @@ class TestDynamicTracking:
         server2 = FastMCP("server2")
 
         # Track both servers
-        options = MCPCatOptions()
+        options = AgentCatOptions()
         track(server1, "project1", options)
         track(server2, "project2", options)
 

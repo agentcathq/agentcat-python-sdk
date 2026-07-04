@@ -1,15 +1,15 @@
 [project]
-name = "mcpcat"
-version = "0.1.15"
-description = "DEPRECATED — renamed to 'agentcat' (pip install agentcat). Analytics Tool for MCP Servers - provides insights into MCP tool usage patterns"
+name = "agentcat"
+version = "1.0.0"
+description = "Analytics tool for MCP (Model Context Protocol) servers and AI agents - tracks tool usage patterns and provides insights"
 authors = [
-    { name = "MCPCat", email = "support@mcpcat.io" },
+    { name = "AgentCat, Inc.", email = "support@agentcat.com" },
 ]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 7 - Inactive",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -19,16 +19,15 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.2.0",
-    "mcpcat-api==0.1.9",
+    "agentcat-api==1.0.0",
     "pydantic>=2.0.0,<2.12",
     "requests>=2.31.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/MCPCat/mcpcat-python-sdk"
-"Bug Tracker" = "https://github.com/MCPCat/mcpcat-python-sdk/issues"
-"Repository" = "https://github.com/MCPCat/mcpcat-python-sdk"
-"Migration" = "https://pypi.org/project/agentcat/"
+"Homepage" = "https://github.com/agentcathq/agentcat-python-sdk"
+"Bug Tracker" = "https://github.com/agentcathq/agentcat-python-sdk/issues"
+"Repository" = "https://github.com/agentcathq/agentcat-python-sdk"
 
 [project.optional-dependencies]
 community = [
@@ -47,18 +46,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mcpcat"]
+packages = ["src/agentcat"]
 
-# Explicit sdist allowlist: the default file selection sweeps untracked
-# working-tree files (local tool configs, build outputs) into the tarball.
 [tool.hatch.build.targets.sdist]
 only-include = [
-    "src/mcpcat",
+    "src/agentcat",
     "tests",
     "README.md",
     "LICENSE",
     "CONTRIBUTING.md",
     "pyproject.toml",
+    "docs/static",
+    "docs/cats",
 ]
 
 [tool.pytest.ini_options]
@@ -80,9 +79,6 @@ filterwarnings = [
     # would still surface. Format: action:message:category:module:lineno
     "ignore:websockets\\.legacy is deprecated:DeprecationWarning:websockets.legacy",
     "ignore:websockets\\.server\\.WebSocketServerProtocol is deprecated:DeprecationWarning:uvicorn.protocols.websockets.websockets_impl",
-    # Our own rename notice (mcpcat -> agentcat) fires on every import of the
-    # package; visibility is covered by tests/test_deprecation_notice.py.
-    "ignore:The 'mcpcat' package has been renamed:FutureWarning",
 ]
 
 [tool.mypy]
@@ -122,7 +118,7 @@ exclude = [
 ]
 
 [tool.ruff.isort]
-known-first-party = ["mcpcat"]
+known-first-party = ["agentcat"]
 
 [dependency-groups]
 dev = [

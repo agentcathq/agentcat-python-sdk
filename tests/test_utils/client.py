@@ -1,4 +1,4 @@
-"""Test client utilities for MCPCat tests."""
+"""Test client utilities for AgentCat tests."""
 
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator

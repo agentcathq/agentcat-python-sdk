@@ -1,6 +1,6 @@
 """Redaction over real-wire payloads.
 
-KNOWN BUG (xfail-tracked): `mcpcat.modules.redaction.redact_event` only
+KNOWN BUG (xfail-tracked): `agentcat.modules.redaction.redact_event` only
 recurses into `dict` and `list` types, not Pydantic `UnredactedEvent` objects.
 The event_queue worker invokes `redact_event(event, ...)` where `event` is an
 `UnredactedEvent`; the call returns the input unchanged, so customer-supplied
@@ -20,7 +20,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from mcpcat.modules.internal import get_server_tracking_data
+from agentcat.modules.internal import get_server_tracking_data
 
 
 pytestmark = pytest.mark.e2e

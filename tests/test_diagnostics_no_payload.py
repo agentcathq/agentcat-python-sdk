@@ -10,11 +10,11 @@ import time
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
-from mcpcat.modules import diagnostics
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.logging import set_diagnostics_sink
-from mcpcat.types import UserIdentity
+from agentcat import AgentCatOptions, track
+from agentcat.modules import diagnostics
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.logging import set_diagnostics_sink
+from agentcat.types import UserIdentity
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
@@ -59,7 +59,7 @@ async def test_diagnostics_never_leak_payloads_or_identity(captured):
     track(
         server,
         "test-project",
-        MCPCatOptions(
+        AgentCatOptions(
             enable_report_missing=True,
             enable_tracing=True,
             identify=identify_fn,
@@ -76,9 +76,9 @@ async def test_diagnostics_never_leak_payloads_or_identity(captured):
     all_logs = "\n".join(captured)
 
     # Setup beacons present + metadata-only.
-    assert "MCPCat setup started" in all_logs
+    assert "AgentCat setup started" in all_logs
     assert "test-project" in all_logs
-    assert "MCPCat setup complete" in all_logs
+    assert "AgentCat setup complete" in all_logs
     assert "tracing=True" in all_logs
 
     # Report-missing logs only the context length, never the context text.

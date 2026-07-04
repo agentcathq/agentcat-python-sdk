@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcpcat.modules.validation import (
+from agentcat.modules.validation import (
     MAX_TAG_ENTRIES,
     MAX_TAG_KEY_LENGTH,
     MAX_TAG_VALUE_LENGTH,
@@ -14,7 +14,7 @@ from mcpcat.modules.validation import (
 
 @pytest.fixture(autouse=True)
 def mock_log():
-    with patch("mcpcat.modules.validation.write_to_log") as mock:
+    with patch("agentcat.modules.validation.write_to_log") as mock:
         yield mock
 
 

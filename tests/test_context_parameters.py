@@ -4,7 +4,7 @@ import pytest
 from copy import deepcopy
 from typing import Any
 
-from mcpcat.modules.context_parameters import (
+from agentcat.modules.context_parameters import (
     add_context_parameter_to_tools,
     add_context_parameter_to_schema,
 )

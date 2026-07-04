@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.exceptions import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.exceptions import (
     capture_exception,
     extract_context_line,
     filename_for_module,
@@ -432,7 +432,7 @@ class TestExceptionIntegration:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Set up and tear down for each test."""
-        from mcpcat.modules.event_queue import event_queue as original_queue
+        from agentcat.modules.event_queue import event_queue as original_queue
 
         yield
         set_event_queue(original_queue)
@@ -458,7 +458,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -485,7 +485,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -512,7 +512,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -539,7 +539,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -578,7 +578,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -612,7 +612,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
@@ -647,7 +647,7 @@ class TestExceptionIntegration:
         captured_events = self._create_mock_event_capture()
 
         server = create_todo_server()
-        options = MCPCatOptions(enable_tracing=True)
+        options = AgentCatOptions(enable_tracing=True)
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:

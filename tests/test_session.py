@@ -7,16 +7,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from freezegun import freeze_time
 
-from mcpcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
-from mcpcat.modules.internal import get_server_tracking_data, set_server_tracking_data
-from mcpcat.modules.session import (
-    get_mcpcat_version,
+from agentcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID_PREFIX
+from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
+from agentcat.modules.session import (
+    get_agentcat_version,
     get_server_session_id,
     get_session_info,
     new_session_id,
     set_last_activity,
 )
-from mcpcat.types import MCPCatData, MCPCatOptions, SessionInfo
+from agentcat.types import AgentCatData, AgentCatOptions, SessionInfo
 
 from .test_utils.todo_server import create_todo_server
 
@@ -44,21 +44,21 @@ class TestNewSessionId:
         assert len(parts[1]) > 0  # KSUID part should not be empty
 
 
-class TestGetMcpcatVersion:
-    """Test the get_mcpcat_version function."""
+class TestGetAgentcatVersion:
+    """Test the get_agentcat_version function."""
 
     @patch("importlib.metadata.version")
     def test_returns_correct_version(self, mock_version):
-        """Test that get_mcpcat_version returns the correct version."""
+        """Test that get_agentcat_version returns the correct version."""
         mock_version.return_value = "1.2.3"
-        assert get_mcpcat_version() == "1.2.3"
-        mock_version.assert_called_once_with("mcpcat")
+        assert get_agentcat_version() == "1.2.3"
+        mock_version.assert_called_once_with("agentcat")
 
     @patch("importlib.metadata.version")
     def test_returns_none_on_exception(self, mock_version):
-        """Test that get_mcpcat_version returns None when an exception occurs."""
+        """Test that get_agentcat_version returns None when an exception occurs."""
         mock_version.side_effect = Exception("Package not found")
-        assert get_mcpcat_version() is None
+        assert get_agentcat_version() is None
 
 
 class TestGetSessionInfo:
@@ -68,8 +68,8 @@ class TestGetSessionInfo:
         """Set up test fixtures."""
         self.server = create_todo_server()
 
-    def test_without_mcpcat_data(self):
-        """Test get_session_info without MCPCat data."""
+    def test_without_agentcat_data(self):
+        """Test get_session_info without AgentCat data."""
         session_info = get_session_info(self.server, None)
 
         assert session_info.ip_address is None
@@ -77,7 +77,7 @@ class TestGetSessionInfo:
             session_info.sdk_language
             == f"Python {sys.version_info.major}.{sys.version_info.minor}"
         )
-        assert session_info.mcpcat_version == get_mcpcat_version()
+        assert session_info.agentcat_version == get_agentcat_version()
         assert session_info.server_name == "todo-server"
         assert (
             session_info.server_version is None
@@ -88,14 +88,14 @@ class TestGetSessionInfo:
         assert session_info.identify_actor_name is None
         assert session_info.identify_data is None
 
-    def test_with_mcpcat_data_no_actor(self):
-        """Test get_session_info with MCPCat data but no identified actor."""
-        data = MCPCatData(
+    def test_with_agentcat_data_no_actor(self):
+        """Test get_session_info with AgentCat data but no identified actor."""
+        data = AgentCatData(
             project_id="test_project",
             session_id="test_session",
             session_info=SessionInfo(client_name="TestClient", client_version="2.0.0"),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         session_info = get_session_info(self.server, data)
@@ -111,12 +111,12 @@ class TestGetSessionInfo:
 
     def test_session_info_never_carries_identity(self):
         """get_session_info returns None for identity fields."""
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="test_project",
             session_id="test_session",
             session_info=SessionInfo(client_name="TestClient", client_version="2.0.0"),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         session_info = get_session_info(self.server, data)
@@ -140,14 +140,14 @@ class TestGetSessionInfo:
     def test_get_session_info_with_tracked_server(self):
         """Test get_session_info when server has tracked data."""
         # Set up initial data
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="test_project",
             session_id="test_session",
             session_info=SessionInfo(
                 client_name="TrackedClient", client_version="3.0.0"
             ),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         # Store data using set_server_tracking_data
@@ -177,12 +177,12 @@ class TestSetLastActivity:
         """Test that set_last_activity updates the last activity timestamp."""
         initial_time = datetime.now(timezone.utc)
 
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="test_project",
             session_id="test_session",
             session_info=SessionInfo(),
             last_activity=initial_time,
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         # Set up the server with tracking data
@@ -200,7 +200,7 @@ class TestSetLastActivity:
         with pytest.raises(Exception) as exc_info:
             set_last_activity(self.server)
 
-        assert str(exc_info.value) == "MCPCat data not initialized for this server"
+        assert str(exc_info.value) == "AgentCat data not initialized for this server"
 
 
 class TestGetServerSessionId:
@@ -212,12 +212,12 @@ class TestGetServerSessionId:
         self.initial_time = datetime.now(timezone.utc)
         self.initial_session_id = "ses_initial123"
 
-        self.data = MCPCatData(
+        self.data = AgentCatData(
             project_id="test_project",
             session_id=self.initial_session_id,
             session_info=SessionInfo(),
             last_activity=self.initial_time,
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
     def test_returns_existing_session_when_not_timed_out(self):
@@ -269,7 +269,7 @@ class TestGetServerSessionId:
         with pytest.raises(Exception) as exc_info:
             get_server_session_id(self.server)
 
-        assert str(exc_info.value) == "MCPCat data not initialized for this server"
+        assert str(exc_info.value) == "AgentCat data not initialized for this server"
 
     def test_multiple_calls_with_activity(self):
         """Test multiple calls to get_server_session_id with activity between them."""
@@ -325,14 +325,14 @@ class TestIntegration:
 
         # Create initial session data
         initial_session_id = new_session_id()
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="integration_project",
             session_id=initial_session_id,
             session_info=SessionInfo(
                 client_name="IntegrationClient", client_version="1.0.0"
             ),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         set_server_tracking_data(server, data)
@@ -354,14 +354,14 @@ class TestIntegration:
             new_sid = get_server_session_id(server)
             assert new_sid != initial_session_id
 
-            new_data = MCPCatData(
+            new_data = AgentCatData(
                 project_id="integration_project",
                 session_id=new_sid,
                 session_info=SessionInfo(
                     client_name="IntegrationClient", client_version="1.0.0"
                 ),
                 last_activity=datetime(2024, 1, 1, 12, 31, 0),
-                options=MCPCatOptions(),
+                options=AgentCatOptions(),
             )
             session_info = get_session_info(server, new_data)
             assert session_info.identify_actor_given_id is None
@@ -372,12 +372,12 @@ class TestIntegration:
         server = create_todo_server()
 
         # Initialize tracking data
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="persistence_test",
             session_id=new_session_id(),
             session_info=SessionInfo(),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         set_server_tracking_data(server, data)
@@ -400,14 +400,14 @@ class TestIntegration:
         """get_session_info updates the tracked data's session_info."""
         server = create_todo_server()
 
-        data = MCPCatData(
+        data = AgentCatData(
             project_id="update_test",
             session_id="update_session",
             session_info=SessionInfo(
                 client_name="UpdateClient", client_version="1.0.0"
             ),
             last_activity=datetime.now(timezone.utc),
-            options=MCPCatOptions(),
+            options=AgentCatOptions(),
         )
 
         set_server_tracking_data(server, data)

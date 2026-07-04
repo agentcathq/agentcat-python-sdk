@@ -6,28 +6,28 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcpcat import MCPCatOptions, track
-from mcpcat.modules.constants import MCPCAT_SOURCE
-from mcpcat.modules.event_queue import EventQueue, set_event_queue
-from mcpcat.modules.internal import (
+from agentcat import AgentCatOptions, track
+from agentcat.modules.constants import AGENTCAT_SOURCE
+from agentcat.modules.event_queue import EventQueue, set_event_queue
+from agentcat.modules.internal import (
     attach_event_metadata,
     resolve_event_properties,
     resolve_event_tags,
 )
-from mcpcat.modules.redaction import redact_event
-from mcpcat.types import EventType, MCPCatData, SessionInfo, UnredactedEvent
+from agentcat.modules.redaction import redact_event
+from agentcat.types import EventType, AgentCatData, SessionInfo, UnredactedEvent
 
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
 
 
-def _make_data(event_tags=None, event_properties=None) -> MCPCatData:
-    return MCPCatData(
+def _make_data(event_tags=None, event_properties=None) -> AgentCatData:
+    return AgentCatData(
         project_id="p",
         session_id="ses_x",
         last_activity=None,
         session_info=SessionInfo(),
-        options=MCPCatOptions(
+        options=AgentCatOptions(
             event_tags=event_tags, event_properties=event_properties
         ),
     )
@@ -180,7 +180,7 @@ class TestFastMCPIntegration:
 
     @pytest.fixture(autouse=True)
     def restore_queue(self):
-        from mcpcat.modules.event_queue import event_queue as original
+        from agentcat.modules.event_queue import event_queue as original
         yield
         set_event_queue(original)
 
@@ -195,7 +195,7 @@ class TestFastMCPIntegration:
         track(
             server,
             "proj_test",
-            MCPCatOptions(
+            AgentCatOptions(
                 event_tags=lambda req, ctx: {"env": "test", "bad!": "dropped"},
                 event_properties=lambda req, ctx: {"flag": True, "build": "abc"},
             ),
@@ -222,7 +222,7 @@ class TestFastMCPIntegration:
             raise RuntimeError("callback broken")
 
         server = create_todo_server()
-        track(server, "proj_test", MCPCatOptions(event_tags=boom, event_properties=boom))
+        track(server, "proj_test", AgentCatOptions(event_tags=boom, event_properties=boom))
 
         async with create_test_client(server) as client:
             await client.call_tool("add_todo", {"text": "hi"})
@@ -250,7 +250,7 @@ class TestFastMCPIntegration:
         track(
             server,
             "proj_test",
-            MCPCatOptions(event_tags=async_tags, event_properties=async_props),
+            AgentCatOptions(event_tags=async_tags, event_properties=async_props),
         )
 
         async with create_test_client(server) as client:
@@ -276,7 +276,7 @@ class TestDatadogExporter:
         return event
 
     def test_source_and_customer_tags_added_to_ddtags(self):
-        from mcpcat.modules.exporters.datadog import DatadogExporter
+        from agentcat.modules.exporters.datadog import DatadogExporter
 
         exporter = DatadogExporter(
             {"type": "datadog", "api_key": "k", "site": "datadoghq.com", "service": "svc", "env": "prod"}
@@ -287,17 +287,17 @@ class TestDatadogExporter:
         )
         log = exporter.event_to_log(event)
         ddtags = log["ddtags"].split(",")
-        assert f"source:{MCPCAT_SOURCE}" in ddtags
-        assert "mcpcat.trace_id:abc_def" in ddtags  # key sanitized + value comma→_
-        assert "mcpcat.region:us-east-1" in ddtags
-        assert log["ddsource"] == MCPCAT_SOURCE
+        assert f"source:{AGENTCAT_SOURCE}" in ddtags
+        assert "agentcat.trace_id:abc_def" in ddtags  # key sanitized + value comma→_
+        assert "agentcat.region:us-east-1" in ddtags
+        assert log["ddsource"] == AGENTCAT_SOURCE
         assert log["mcp"]["tags"] == {"Trace:Id": "abc,def", "Region": "us-east-1"}
         assert log["mcp"]["properties"] == {"flag": True}
 
 
 class TestOTLPExporter:
     def test_source_and_customer_tags_and_properties(self):
-        from mcpcat.modules.exporters.otlp import OTLPExporter
+        from agentcat.modules.exporters.otlp import OTLPExporter
 
         exporter = OTLPExporter({"type": "otlp"})
         event = UnredactedEvent(
@@ -308,14 +308,14 @@ class TestOTLPExporter:
         event.properties = {"flag": True, "count": 3}
         attrs = exporter._get_span_attributes(event)
         keys = {a["key"]: a["value"].get("stringValue") for a in attrs}
-        assert keys.get("source") == MCPCAT_SOURCE
-        assert keys.get("mcpcat.tag.env") == "prod"
-        assert json.loads(keys["mcpcat.properties"]) == {"flag": True, "count": 3}
+        assert keys.get("source") == AGENTCAT_SOURCE
+        assert keys.get("agentcat.tag.env") == "prod"
+        assert json.loads(keys["agentcat.properties"]) == {"flag": True, "count": 3}
 
 
 class TestSentryExporter:
     def test_source_and_customer_tags_namespaced_and_properties_in_context(self):
-        from mcpcat.modules.exporters.sentry import SentryExporter
+        from agentcat.modules.exporters.sentry import SentryExporter
 
         exporter = SentryExporter(
             {
@@ -335,10 +335,10 @@ class TestSentryExporter:
         event.properties = {"flag": True, "nested": {"x": 1}}
 
         tags = exporter.build_tags(event)
-        assert tags["source"] == MCPCAT_SOURCE
-        assert tags["mcpcat.env"] == "test"
-        assert tags["mcpcat.trace_id"] == "abc"
+        assert tags["source"] == AGENTCAT_SOURCE
+        assert tags["agentcat.env"] == "test"
+        assert tags["agentcat.trace_id"] == "abc"
 
         contexts = exporter.build_contexts(event, {"trace_id": "t"})
         assert contexts["trace"] == {"trace_id": "t"}
-        assert contexts["mcpcat"] == {"flag": True, "nested": {"x": 1}}
+        assert contexts["agentcat"] == {"flag": True, "nested": {"x": 1}}

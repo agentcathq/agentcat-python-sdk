@@ -171,7 +171,7 @@ jobs:
         uv venv
 
         # Install base dependencies first
-        uv pip install pydantic>=2.0.0 requests>=2.31.0 mcpcat-api==0.1.4
+        uv pip install pydantic>=2.0.0 requests>=2.31.0 agentcat-api==1.0.0
 
         # Install the specific MCP prerelease version
         uv pip install "mcp==${{ matrix.mcp-version }}" --prerelease=allow
@@ -382,11 +382,11 @@ jobs:
         if failing_fastmcp:
             subject_parts.append('FastMCP ' + ', '.join(failing_fastmcp))
         subject_suffix = ' | '.join(subject_parts) if subject_parts else 'See workflow logs'
-        subject_line = f'⚠️ MCPCat Prerelease Tests Failed - {subject_suffix}'
+        subject_line = f'⚠️ AgentCat Prerelease Tests Failed - {subject_suffix}'
         print(f'Email subject suffix: {subject_suffix}')
 
         email_html = f'''
-        <h2>⚠️ MCPCat Prerelease Compatibility Tests Failed</h2>
+        <h2>⚠️ AgentCat Prerelease Compatibility Tests Failed</h2>
 
         <p>The prerelease compatibility tests have failed. This may indicate upcoming breaking changes in MCP or FastMCP.</p>
 
@@ -423,7 +423,7 @@ jobs:
         repo_tag = '${{ github.repository }}'.replace('/', '_')
 
         params = {
-            'from': 'no-reply@mcpcat.io',  # Use Resend's default verified domain
+            'from': 'no-reply@agentcat.com',  # Requires agentcat.com verified in Resend (rebrand Phase 1)
             'to': [alert_email],  # Use variable, not inline secret
             'subject': subject_line,
             'html': email_html,
