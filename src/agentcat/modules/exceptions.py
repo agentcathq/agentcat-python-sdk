@@ -17,6 +17,17 @@ _captured_error: contextvars.ContextVar[BaseException | None] = contextvars.Cont
 )
 
 
+def _safe_str(value: Any) -> str:
+    """str(value) that never raises (exceptions may have a broken __str__)."""
+    try:
+        return str(value)
+    except Exception:
+        try:
+            return f"<unprintable {type(value).__name__} instance>"
+        except Exception:
+            return "<unprintable error>"
+
+
 def capture_exception(exc: BaseException | Any) -> ErrorData:
     """
     Captures detailed exception information including stack traces and cause chains.
@@ -26,12 +37,33 @@ def capture_exception(exc: BaseException | Any) -> ErrorData:
     tracebacks into structured frames and detects whether each frame is user
     code (in_app: True) or library code (in_app: False).
 
+    This function must NEVER raise — it runs on the customer's request path
+    (tool-call wrappers) where an escaping exception would corrupt the
+    customer's request handling. Any internal failure degrades to a minimal
+    ErrorData dict.
+
     Args:
         exc: The error to capture (can be BaseException, string, object, or any value)
 
     Returns:
         ErrorData dict with structured error information including platform="python"
     """
+    try:
+        return _capture_exception_unsafe(exc)
+    except Exception:
+        try:
+            type_name = type(exc).__name__ if isinstance(exc, BaseException) else None
+        except Exception:
+            type_name = None
+        return {
+            "message": _safe_str(exc),
+            "type": type_name,
+            "platform": "python",
+        }
+
+
+def _capture_exception_unsafe(exc: BaseException | Any) -> ErrorData:
+    """Implementation of capture_exception; see its docstring."""
     if is_call_tool_result(exc):
         return capture_call_tool_result_error(exc)
 
@@ -43,7 +75,7 @@ def capture_exception(exc: BaseException | Any) -> ErrorData:
         }
 
     error_data: ErrorData = {
-        "message": str(exc),
+        "message": _safe_str(exc),
         "type": type(exc).__name__,
         "platform": "python",
     }
@@ -281,7 +313,7 @@ def unwrap_exception_chain(exc: BaseException) -> list[ChainedErrorData]:
             break
 
         chained_data: ChainedErrorData = {
-            "message": str(next_exc),
+            "message": _safe_str(next_exc),
             "type": type(next_exc).__name__,
         }
 
@@ -315,7 +347,7 @@ def format_exception_string(exc: BaseException) -> str:
     try:
         return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     except Exception:
-        return f"{type(exc).__name__}: {exc}"
+        return f"{type(exc).__name__}: {_safe_str(exc)}"
 
 
 def is_call_tool_result(value: Any) -> bool:
@@ -403,7 +435,7 @@ def stringify_non_exception(value: Any) -> str:
 
         return json.dumps(value)
     except Exception:
-        return str(value)
+        return _safe_str(value)
 
 
 def store_captured_error(exc: BaseException) -> None:

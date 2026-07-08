@@ -15,7 +15,7 @@ from agentcat.modules.compatibility import is_mcp_error_response
 from agentcat.modules.exceptions import capture_exception
 from agentcat.modules.identify import identify_session
 from agentcat.modules.internal import attach_event_metadata, get_server_tracking_data
-from agentcat.modules.logging import write_to_log
+from agentcat.modules.logging import safe_error_string, write_to_log
 from agentcat.modules.request_extra import params_with_extra
 from agentcat.modules.session import (
     get_client_info_from_request_context,
@@ -100,7 +100,9 @@ def patch_community_fastmcp(server: Any) -> None:
             # Handle session identification
             try:
                 client_name, client_version = get_client_info_from_request_context(lowlevel_server, request_context)
-                identity = identify_session(lowlevel_server, request, request_context)
+                identity = await identify_session(
+                    lowlevel_server, request, request_context
+                )
             except Exception as e:
                 client_name, client_version = None, None
                 identity = None
@@ -166,7 +168,7 @@ def patch_community_fastmcp(server: Any) -> None:
                 return result
 
             except Exception as e:
-                write_to_log(f"Error in wrapped_call_tool_handler: {e}")
+                write_to_log(f"Error in wrapped_call_tool_handler: {safe_error_string(e)}")
                 event.is_error = True
                 # Use full exception capture with stack trace
                 try:
@@ -175,7 +177,7 @@ def patch_community_fastmcp(server: Any) -> None:
                     # Fallback to simple error if capture fails
                     write_to_log(f"Error capturing exception: {capture_err}")
                     event.error = {
-                        "message": str(e),
+                        "message": safe_error_string(e),
                         "type": type(e).__name__,
                         "platform": "python",
                     }

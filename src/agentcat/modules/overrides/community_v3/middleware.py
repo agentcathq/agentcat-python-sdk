@@ -22,7 +22,7 @@ from agentcat.modules.exceptions import (
 )
 from agentcat.modules.identify import identify_session
 from agentcat.modules.internal import attach_event_metadata, mark_tool_tracked, register_tool
-from agentcat.modules.logging import write_to_log
+from agentcat.modules.logging import safe_error_string, write_to_log
 from agentcat.modules.request_extra import params_with_extra
 from agentcat.modules.session import (
     get_client_info_from_request_context,
@@ -112,7 +112,9 @@ class AgentCatMiddleware:
                 client_name, client_version = get_client_info_from_request_context(self.server, request_context)
             else:
                 get_client_info_from_request_context(self.server, request_context)
-            identity = identify_session(self.server, context.message, request_context)
+            identity = await identify_session(
+                self.server, context.message, request_context
+            )
         except Exception as e:
             identity = None
             write_to_log(f"Non-critical error in session handling: {e}")
@@ -170,7 +172,9 @@ class AgentCatMiddleware:
         request_context = self._get_request_context(context)
         try:
             client_name, client_version = get_client_info_from_request_context(self.server, request_context)
-            identity = identify_session(self.server, context.message, request_context)
+            identity = await identify_session(
+                self.server, context.message, request_context
+            )
         except Exception as e:
             client_name, client_version = None, None
             identity = None
@@ -238,7 +242,7 @@ class AgentCatMiddleware:
             return result
 
         except Exception as e:
-            write_to_log(f"Error in on_call_tool: {e}")
+            write_to_log(f"Error in on_call_tool: {safe_error_string(e)}")
             event.is_error = True
             store_captured_error(e)
             event.error = capture_exception(e)
@@ -269,7 +273,9 @@ class AgentCatMiddleware:
         request_context = self._get_request_context(context)
         try:
             client_name, client_version = get_client_info_from_request_context(self.server, request_context)
-            identity = identify_session(self.server, context.message, request_context)
+            identity = await identify_session(
+                self.server, context.message, request_context
+            )
         except Exception as e:
             client_name, client_version = None, None
             identity = None

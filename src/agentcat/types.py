@@ -6,12 +6,19 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional, Set, TypedDict, Literal, Union, NotRequired
 from agentcat_api import PublishEventRequest
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
-from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
+from agentcat.modules.constants import (
+    AGENTCAT_CUSTOM_EVENT_TYPE,
+    DEFAULT_CONTEXT_DESCRIPTION,
+)
 
-# Type alias for identify function
-IdentifyFunction = Callable[[dict[str, Any], Any], Optional["UserIdentity"]]
+# Type alias for identify function.
+# Accepts sync or async callables (coroutine results are awaited).
+IdentifyFunction = Callable[
+    [dict[str, Any], Any],
+    Optional["UserIdentity"] | Awaitable[Optional["UserIdentity"]],
+]
 # Type alias for redaction function
 RedactionFunction = Callable[[str], str | Awaitable[str]]
 # Type alias for event_tags callback — returns str:str map attached to every auto-captured event.
@@ -57,6 +64,17 @@ class Event(PublishEventRequest):
     # constructs events before the project ID is known: event_queue merges it in
     # at publish time, and telemetry-only mode sends events without one.
     project_id: Optional[str] = None
+
+    @field_validator("event_type")
+    def event_type_validate_enum(
+        cls, value: Optional[str]  # noqa: N805 — pydantic validator
+    ) -> Optional[str]:
+        """Relax the generated enum check to admit SDK-defined event types
+        (e.g. "agentcat:custom") the generated client doesn't know about."""
+        if value == AGENTCAT_CUSTOM_EVENT_TYPE:
+            return value
+        validated: Optional[str] = PublishEventRequest.event_type_validate_enum(value)
+        return validated
 
 
 # Error tracking types
@@ -120,6 +138,23 @@ class UnredactedEvent(Event):
 
 
 @dataclass
+class CustomEventData:
+    """Optional payload for `agentcat.publish_custom_event`."""
+
+    resource_name: str | None = None
+    parameters: dict[str, Any] | None = None
+    response: dict[str, Any] | None = None
+    # Human-readable explanation of the event; stored as user_intent.
+    message: str | None = None
+    duration: int | None = None  # milliseconds
+    is_error: bool | None = None
+    error: dict[str, Any] | None = None
+    # Customer-defined metadata (same semantics as event_tags/event_properties)
+    tags: dict[str, str] | None = None
+    properties: dict[str, Any] | None = None
+
+
+@dataclass
 class ToolRegistration:
     """Metadata about a registered tool."""
 
@@ -162,8 +197,25 @@ class SentryExporterConfig(TypedDict):
     enable_tracing: Optional[bool]  # Optional, defaults to True
 
 
+class PostHogExporterConfig(TypedDict):
+    """Configuration for PostHog exporter."""
+
+    type: Literal["posthog"]
+    api_key: str  # Required - PostHog project API key (e.g. phc_...)
+    # Optional, defaults to https://us.i.posthog.com (supports self-hosted & EU region)
+    host: NotRequired[str]
+    # Emits $ai_span events for tool calls alongside regular capture events,
+    # integrating with PostHog's AI observability views. Defaults to False.
+    enable_ai_tracing: NotRequired[bool]
+
+
 # Union type for all exporter configurations
-ExporterConfig = Union[OTLPExporterConfig, DatadogExporterConfig, SentryExporterConfig]
+ExporterConfig = Union[
+    OTLPExporterConfig,
+    DatadogExporterConfig,
+    SentryExporterConfig,
+    PostHogExporterConfig,
+]
 
 
 @dataclass

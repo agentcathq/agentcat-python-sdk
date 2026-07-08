@@ -61,31 +61,31 @@ class TestStatelessMode:
         assert session_id is None
 
     @patch("agentcat.modules.identify.event_queue")
-    def test_stateless_identify_runs_every_time(self, mock_event_queue):
+    async def test_stateless_identify_runs_every_time(self, mock_event_queue):
         """In stateless mode, identify should run on every call (no early-return guard)."""
         mock_fn = MagicMock(return_value=UserIdentity(
             user_id="alice", user_name="Alice", user_data=None
         ))
         self._setup_data(stateless=True, identify=mock_fn)
 
-        identify_session(self.server, MagicMock(), MagicMock())
-        identify_session(self.server, MagicMock(), MagicMock())
+        await identify_session(self.server, MagicMock(), MagicMock())
+        await identify_session(self.server, MagicMock(), MagicMock())
 
         assert mock_fn.call_count == 2
 
     @patch("agentcat.modules.identify.event_queue")
-    def test_stateless_identify_returns_identity(self, mock_event_queue):
+    async def test_stateless_identify_returns_identity(self, mock_event_queue):
         """In stateless mode, identify_session() should return the UserIdentity."""
         self._setup_data(stateless=True, identify=_make_identify_fn())
 
-        result = identify_session(self.server, MagicMock(), MagicMock())
+        result = await identify_session(self.server, MagicMock(), MagicMock())
 
         assert isinstance(result, UserIdentity)
         assert result.user_id == "user_123"
         assert result.user_name == "Test User"
 
     @patch("agentcat.modules.identify.event_queue")
-    def test_stateful_identify_runs_every_time(self, mock_event_queue):
+    async def test_stateful_identify_runs_every_time(self, mock_event_queue):
         """Stateful mode runs identify on every request."""
         mock_fn = MagicMock(return_value=UserIdentity(
             user_id="alice", user_name="Alice", user_data=None
@@ -97,8 +97,8 @@ class TestStatelessMode:
         assert isinstance(session_id, str)
         assert session_id.startswith("ses_")
 
-        identify_session(self.server, MagicMock(), MagicMock())
-        identify_session(self.server, MagicMock(), MagicMock())
+        await identify_session(self.server, MagicMock(), MagicMock())
+        await identify_session(self.server, MagicMock(), MagicMock())
 
         assert mock_fn.call_count == 2
 
@@ -131,23 +131,23 @@ class TestStatelessMode:
         assert data.is_stateless is False
 
     @patch("agentcat.modules.identify.event_queue")
-    def test_stateless_identify_bad_return(self, mock_event_queue):
+    async def test_stateless_identify_bad_return(self, mock_event_queue):
         """In stateless mode, identify returning non-UserIdentity should return None."""
         bad_fn = MagicMock(return_value="not a UserIdentity")
         self._setup_data(stateless=True, identify=bad_fn)
 
-        result = identify_session(self.server, MagicMock(), MagicMock())
+        result = await identify_session(self.server, MagicMock(), MagicMock())
 
         assert result is None
         assert bad_fn.call_count == 1
 
     @patch("agentcat.modules.identify.event_queue")
-    def test_stateless_identify_exception(self, mock_event_queue):
+    async def test_stateless_identify_exception(self, mock_event_queue):
         """In stateless mode, identify raising should return None, not propagate."""
         raising_fn = MagicMock(side_effect=RuntimeError("identify exploded"))
         self._setup_data(stateless=True, identify=raising_fn)
 
-        result = identify_session(self.server, MagicMock(), MagicMock())
+        result = await identify_session(self.server, MagicMock(), MagicMock())
 
         assert result is None
         assert raising_fn.call_count == 1

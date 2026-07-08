@@ -1,5 +1,6 @@
 """Session management for AgentCat."""
 
+import hashlib
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -11,13 +12,57 @@ from agentcat.modules.constants import INACTIVITY_TIMEOUT_IN_MINUTES, SESSION_ID
 from agentcat.modules.internal import get_server_tracking_data, set_server_tracking_data
 from agentcat.modules.logging import write_to_log
 
+from ..thirdparty.ksuid import Ksuid
 from ..types import AgentCatData, SessionInfo
 from ..utils import generate_prefixed_ksuid
+
+# Fixed epoch used when deriving deterministic session IDs (2024-01-01T00:00:00Z,
+# in milliseconds). Must match the TypeScript SDK's session.ts for cross-SDK
+# determinism.
+_DERIVED_SESSION_EPOCH_MS = 1704067200000
+# Maximum timestamp offset added to the epoch (1 year, in milliseconds).
+_DERIVED_SESSION_MAX_OFFSET_MS = 365 * 24 * 60 * 60 * 1000
 
 
 def new_session_id() -> str:
     """Generate a new session ID."""
     return generate_prefixed_ksuid(SESSION_ID_PREFIX)
+
+
+def derive_session_id_from_mcp_session(
+    mcp_session_id: str, project_id: str | None = None
+) -> str:
+    """Create a deterministic KSUID session ID from an MCP session ID.
+
+    The same inputs always produce the same session ID, enabling correlation
+    across server restarts (mirrors the TypeScript SDK's
+    deriveSessionIdFromMCPSession).
+
+    Args:
+        mcp_session_id: The session ID from the MCP protocol
+        project_id: Optional AgentCat project ID to include in the hash
+
+    Returns:
+        A KSUID with the "ses" prefix derived deterministically from the inputs
+    """
+    input_str = f"{mcp_session_id}:{project_id}" if project_id else mcp_session_id
+
+    # Hash the input with SHA-256
+    digest = hashlib.sha256(input_str.encode("utf-8")).digest()
+
+    # Derive a deterministic but valid timestamp from the first 4 bytes:
+    # fixed 2024-01-01 epoch plus a hash-based offset capped at 1 year.
+    timestamp_offset = (
+        int.from_bytes(digest[:4], "big") % _DERIVED_SESSION_MAX_OFFSET_MS
+    )
+    timestamp_ms = _DERIVED_SESSION_EPOCH_MS + timestamp_offset
+
+    # Use the next 16 bytes of the hash as the KSUID payload
+    ksuid = Ksuid(
+        datetime=datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc),
+        payload=digest[4:20],
+    )
+    return f"{SESSION_ID_PREFIX}_{ksuid}"
 
 
 def get_agentcat_version() -> str | None:

@@ -1,5 +1,7 @@
 """Unit tests for the redaction module."""
 
+from datetime import datetime, timezone
+
 import pytest
 from typing import Any, Dict
 from agentcat.modules.redaction import (
@@ -7,6 +9,7 @@ from agentcat.modules.redaction import (
     redact_event,
     PROTECTED_FIELDS,
 )
+from agentcat.types import UnredactedEvent
 
 
 class TestRedactStringsInObject:
@@ -367,3 +370,131 @@ class TestRedactEvent:
         # The function should propagate the error
         with pytest.raises(ValueError, match="Redaction error"):
             redact_event(event, faulty_redact_fn)
+
+
+class TestRedactEventPydanticModel:
+    """Redaction must fire on the live publish path, where events are
+    Pydantic UnredactedEvent models rather than plain dicts."""
+
+    def _make_event(self, **overrides) -> UnredactedEvent:
+        defaults = {
+            "id": "evt_123",
+            "session_id": "ses_abc",
+            "project_id": "proj_456",
+            "event_type": "mcp:tools/call",
+            "resource_name": "add_todo",
+            "timestamp": datetime.now(timezone.utc),
+            "parameters": {
+                "arguments": {"text": "secret-value"},
+                "extra": {"headers": {"authorization": "Bearer token-xyz"}},
+            },
+            "user_intent": "do a secret thing",
+        }
+        defaults.update(overrides)
+        return UnredactedEvent(**defaults)
+
+    def test_pydantic_event_strings_are_redacted(self):
+        def redact_fn(s: str) -> str:
+            return "[REDACTED]"
+
+        event = self._make_event()
+        result = redact_event(event, redact_fn)
+
+        # Returns a rebuilt model of the same class
+        assert isinstance(result, UnredactedEvent)
+
+        # Protected fields preserved
+        assert result.id == "evt_123"
+        assert result.session_id == "ses_abc"
+        assert result.project_id == "proj_456"
+        assert result.event_type == "mcp:tools/call"
+        assert result.resource_name == "add_todo"
+
+        # Unprotected string fields redacted, including nested parameters
+        assert result.user_intent == "[REDACTED]"
+        assert result.parameters["arguments"]["text"] == "[REDACTED]"
+        assert (
+            result.parameters["extra"]["headers"]["authorization"] == "[REDACTED]"
+        )
+
+        # Non-string fields untouched
+        assert result.timestamp == event.timestamp
+
+    def test_pydantic_event_original_not_mutated(self):
+        def redact_fn(s: str) -> str:
+            return "X"
+
+        event = self._make_event()
+        redact_event(event, redact_fn)
+        assert event.parameters["arguments"]["text"] == "secret-value"
+
+    def test_pydantic_event_identify_and_tags_protected(self):
+        def redact_fn(s: str) -> str:
+            return "[REDACTED]"
+
+        event = self._make_event(
+            event_type="agentcat:identify",
+            identify_actor_given_id="user123",
+            identify_actor_name="John Doe",
+            identify_data={"email": "john@example.com"},
+            tags={"env": "prod"},
+            properties={"flag": "on"},
+        )
+        result = redact_event(event, redact_fn)
+
+        assert result.identify_actor_given_id == "user123"
+        assert result.identify_actor_name == "John Doe"
+        assert result.identify_data == {"email": "john@example.com"}
+        assert result.tags == {"env": "prod"}
+        assert result.properties == {"flag": "on"}
+
+    def test_pydantic_event_redaction_error_propagates(self):
+        def faulty_redact_fn(s: str) -> str:
+            raise RuntimeError("redaction exploded")
+
+        event = self._make_event()
+        with pytest.raises(RuntimeError, match="redaction exploded"):
+            redact_event(event, faulty_redact_fn)
+
+
+class TestAsyncRedactionFunction:
+    """RedactionFunction accepts sync or async callables; the pipeline must
+    resolve coroutine results (event queue workers run without a loop)."""
+
+    def test_async_redact_fn_on_plain_object(self):
+        async def redact_fn(s: str) -> str:
+            return "[ASYNC-REDACTED]"
+
+        result = redact_strings_in_object({"field": "secret"}, redact_fn)
+        assert result == {"field": "[ASYNC-REDACTED]"}
+
+    def test_async_redact_fn_on_pydantic_event(self):
+        async def redact_fn(s: str) -> str:
+            return s.replace("secret", "[REDACTED]")
+
+        event = UnredactedEvent(
+            id="evt_1",
+            session_id="ses_1",
+            event_type="mcp:tools/call",
+            parameters={"arguments": {"text": "a secret here"}},
+        )
+        result = redact_event(event, redact_fn)
+        assert result.parameters["arguments"]["text"] == "a [REDACTED] here"
+        assert result.session_id == "ses_1"
+
+    def test_async_redact_fn_error_propagates(self):
+        async def redact_fn(s: str) -> str:
+            raise ValueError("async redaction error")
+
+        with pytest.raises(ValueError, match="async redaction error"):
+            redact_strings_in_object({"field": "secret"}, redact_fn)
+
+    async def test_async_redact_fn_inside_running_loop(self):
+        """Defensive path: resolving an async redact fn while a loop is
+        already running in this thread must not deadlock or fail."""
+
+        async def redact_fn(s: str) -> str:
+            return "[LOOPED]"
+
+        result = redact_strings_in_object({"field": "secret"}, redact_fn)
+        assert result == {"field": "[LOOPED]"}

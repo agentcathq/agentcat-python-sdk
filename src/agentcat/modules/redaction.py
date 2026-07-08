@@ -1,6 +1,11 @@
 """PII redaction for AgentCat logs."""
 
+import asyncio
+import inspect
+import threading
 from typing import Any, TYPE_CHECKING, Callable, Set
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from agentcat.types import Event, UnredactedEvent
@@ -25,6 +30,45 @@ PROTECTED_FIELDS: Set[str] = {
 }
 
 
+def _resolve_redacted_value(result: Any) -> Any:
+    """Resolve a redaction result that may be an awaitable.
+
+    Redaction functions may be sync or async (see `RedactionFunction`). The
+    event queue processes events on worker threads with no running event loop,
+    so coroutine results are resolved with `asyncio.run`. If a loop is already
+    running in this thread (defensive; not the normal publish path), the
+    coroutine is resolved on a short-lived helper thread instead, since
+    `asyncio.run` cannot be called from inside a running loop.
+    """
+    if not inspect.isawaitable(result):
+        return result
+
+    async def _await() -> Any:
+        return await result
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # Normal path: event-queue worker threads have no event loop.
+        return asyncio.run(_await())
+
+    # A loop is running in this thread — resolve on a fresh thread.
+    outcome: dict[str, Any] = {}
+
+    def _runner() -> None:
+        try:
+            outcome["value"] = asyncio.run(_await())
+        except BaseException as exc:  # noqa: BLE001 — propagated to caller below
+            outcome["error"] = exc
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
 def redact_strings_in_object(
     obj: Any,
     redact_fn: Callable[[str], str],
@@ -38,7 +82,7 @@ def redact_strings_in_object(
 
     Args:
         obj: The object to redact strings from
-        redact_fn: The redaction function to apply to each string
+        redact_fn: The redaction function to apply to each string (sync or async)
         path: The current path in the object tree (used to check protected fields)
         is_protected: Whether the current object/value is within a protected field
 
@@ -53,7 +97,7 @@ def redact_strings_in_object(
         # Don't redact if this field or any parent field is protected
         if is_protected:
             return obj
-        return redact_fn(obj)
+        return _resolve_redacted_value(redact_fn(obj))
 
     # Handle arrays/lists
     if isinstance(obj, list):
@@ -83,7 +127,7 @@ def redact_strings_in_object(
 
         return redacted_obj
 
-    # For all other types (numbers, booleans, etc.), return as-is
+    # For all other types (numbers, booleans, datetimes, etc.), return as-is
     return obj
 
 
@@ -93,11 +137,21 @@ def redact_event(event: "UnredactedEvent", redact_fn: Callable[[str], str]) -> "
     This is the main entry point for redacting sensitive information from events
     before they are sent to the analytics service.
 
+    Accepts either a Pydantic event model (the live publish path — the event is
+    dumped, redacted recursively, and rebuilt) or a plain dict.
+
     Args:
         event: The event to redact
-        redact_fn: The customer's redaction function
+        redact_fn: The customer's redaction function (sync or async)
 
     Returns:
         A new event object with all strings redacted
     """
+    if isinstance(event, BaseModel):
+        # Dump the model to a plain dict (dropping the redaction_fn callable),
+        # redact recursively, then rebuild the same model class.
+        event_dict = event.model_dump(exclude_none=True, exclude={"redaction_fn"})
+        redacted_dict = redact_strings_in_object(event_dict, redact_fn, "", False)
+        return type(event)(**redacted_dict)
+
     return redact_strings_in_object(event, redact_fn, "", False)
