@@ -12,13 +12,28 @@ import asyncio
 from datetime import datetime, timezone
 
 import copy
-import httpx
 import pytest
-from fastmcp import FastMCP
 
 from agentcat.modules.overrides.community_v3 import middleware as v3_middleware
 from agentcat.modules.overrides.community_v3.middleware import AgentCatMiddleware
 from agentcat.types import AgentCatData, AgentCatOptions, SessionInfo
+
+# The community_v3 middleware and FastMCP.from_openapi are FastMCP v3+ only. Skip
+# this module entirely when FastMCP is absent (test-without-fastmcp job) or on the
+# v2 compatibility matrix, without importing fastmcp at module top level.
+try:
+    import httpx
+    import fastmcp
+    from fastmcp import FastMCP
+
+    HAS_FASTMCP_V3 = int(fastmcp.__version__.split(".")[0]) >= 3
+except Exception:  # pragma: no cover - import guard
+    HAS_FASTMCP_V3 = False
+
+pytestmark = pytest.mark.skipif(
+    not HAS_FASTMCP_V3,
+    reason="Requires FastMCP v3+ (community_v3 OpenAPI middleware path)",
+)
 
 
 def _make_data() -> AgentCatData:
