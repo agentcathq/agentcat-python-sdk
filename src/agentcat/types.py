@@ -9,8 +9,8 @@ from agentcat_api import PublishEventRequest
 from pydantic import BaseModel, field_validator
 
 from agentcat.modules.constants import (
-    AGENTCAT_CUSTOM_EVENT_TYPE,
     DEFAULT_CONTEXT_DESCRIPTION,
+    SDK_EVENT_TYPES,
 )
 
 # Type alias for identify function.
@@ -71,7 +71,7 @@ class Event(PublishEventRequest):
     ) -> Optional[str]:
         """Relax the generated enum check to admit SDK-defined event types
         (e.g. "agentcat:custom") the generated client doesn't know about."""
-        if value == AGENTCAT_CUSTOM_EVENT_TYPE:
+        if value in SDK_EVENT_TYPES:
             return value
         validated: Optional[str] = PublishEventRequest.event_type_validate_enum(value)
         return validated

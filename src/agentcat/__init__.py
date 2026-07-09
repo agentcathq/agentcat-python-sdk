@@ -287,6 +287,9 @@ def publish_custom_event(
     """
     from agentcat.modules import event_queue as event_queue_module
 
+    # Normalize once: an omitted payload behaves like an all-defaults payload.
+    event_data = event_data or CustomEventData()
+
     if not project_id:
         raise ValueError("project_id is required for publish_custom_event")
 
@@ -329,19 +332,19 @@ def publish_custom_event(
         event_type=AGENTCAT_CUSTOM_EVENT_TYPE,
         timestamp=datetime.now(timezone.utc),
         # Event data from parameters
-        resource_name=event_data.resource_name if event_data else None,
-        parameters=event_data.parameters if event_data else None,
-        response=event_data.response if event_data else None,
-        user_intent=event_data.message if event_data else None,
-        duration=event_data.duration if event_data else None,
-        is_error=event_data.is_error if event_data else None,
-        error=event_data.error if event_data else None,
+        resource_name=event_data.resource_name,
+        parameters=event_data.parameters,
+        response=event_data.response,
+        user_intent=event_data.message,
+        duration=event_data.duration,
+        is_error=event_data.is_error,
+        error=event_data.error,
     )
 
     # Wire up customer-defined metadata
-    if event_data and event_data.tags:
+    if event_data.tags:
         event.tags = validate_tags(event_data.tags)
-    if event_data and event_data.properties:
+    if event_data.properties:
         event.properties = event_data.properties
 
     # If we have a tracked server, publish through it (merges session info and

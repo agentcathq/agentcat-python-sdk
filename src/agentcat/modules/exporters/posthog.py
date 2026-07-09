@@ -117,19 +117,25 @@ class PostHogExporter(Exporter):
         try:
             batch: list[dict[str, Any]] = []
 
+            # Compute the deterministic UUIDs once per event (KSUID parse +
+            # SHA-256 each time) and share them across the builders.
+            session_uuid = to_uuidv7(event.session_id)
+
             # Always send the regular event
-            batch.append(self.build_capture_event(event))
+            batch.append(self.build_capture_event(event, session_uuid))
 
             # Send $exception event alongside if this is an error
             if event.is_error and event.error:
-                batch.append(self.build_exception_event(event))
+                batch.append(self.build_exception_event(event, session_uuid))
 
             # Send $ai_span for tool calls when AI tracing is enabled
             if (
                 self.enable_ai_tracing
                 and event.event_type == EventType.MCP_TOOLS_CALL.value
             ):
-                batch.append(self.build_ai_span_event(event))
+                batch.append(
+                    self.build_ai_span_event(event, session_uuid, to_uuidv7(event.id))
+                )
 
             write_to_log(
                 f"PostHogExporter: Sending {len(batch)} event(s) for {event.id}"
@@ -152,10 +158,10 @@ class PostHogExporter(Exporter):
         except Exception as error:
             write_to_log(f"PostHog export error: {error}")
 
-    def build_capture_event(self, event: Event) -> dict[str, Any]:
+    def build_capture_event(self, event: Event, session_uuid: str) -> dict[str, Any]:
         """Build the regular PostHog capture event."""
         properties: dict[str, Any] = {
-            "$session_id": to_uuidv7(event.session_id),
+            "$session_id": session_uuid,
             "source": AGENTCAT_SOURCE,
         }
 
@@ -210,11 +216,11 @@ class PostHogExporter(Exporter):
             "type": "capture",
         }
 
-    def build_exception_event(self, event: Event) -> dict[str, Any]:
+    def build_exception_event(self, event: Event, session_uuid: str) -> dict[str, Any]:
         """Build a PostHog $exception event for error events."""
         properties: dict[str, Any] = {
             "$exception_source": "backend",
-            "$session_id": to_uuidv7(event.session_id),
+            "$session_id": session_uuid,
         }
 
         error = event.error or {}
@@ -248,15 +254,17 @@ class PostHogExporter(Exporter):
             "type": "capture",
         }
 
-    def build_ai_span_event(self, event: Event) -> dict[str, Any]:
+    def build_ai_span_event(
+        self, event: Event, session_uuid: str, span_uuid: str
+    ) -> dict[str, Any]:
         """Build a PostHog $ai_span event for AI observability views."""
         properties: dict[str, Any] = {
             "$ai_session_id": f"agentcat_{event.session_id}",
-            "$ai_trace_id": to_uuidv7(event.session_id),
-            "$ai_span_id": to_uuidv7(event.id),
+            "$ai_trace_id": session_uuid,
+            "$ai_span_id": span_uuid,
             "$ai_span_name": event.resource_name or "unknown_tool",
             "$ai_is_error": event.is_error or False,
-            "$session_id": to_uuidv7(event.session_id),
+            "$session_id": session_uuid,
             "source": AGENTCAT_SOURCE,
         }
 

@@ -219,7 +219,9 @@ def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
             try:
                 # Call the original handler
                 result = await original_call_tool_handler(request)
-                is_error, _error_message = is_mcp_error_response(result)
+                # Only the error flag is needed here; capture_exception below
+                # extracts the message itself, so the tuple's message is unused.
+                is_error, _ = is_mcp_error_response(result)
                 event.is_error = is_error
                 # Full structured capture (message/type/platform; the MCP SDK
                 # already converted the exception, so no frames survive here)

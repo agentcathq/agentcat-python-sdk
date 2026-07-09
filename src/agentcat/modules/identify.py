@@ -41,9 +41,6 @@ class IdentityCache:
             self._cache.popitem(last=False)
         self._cache[session_id] = identity
 
-    def __contains__(self, session_id: str) -> bool:
-        return session_id in self._cache
-
     def __len__(self) -> int:
         return len(self._cache)
 

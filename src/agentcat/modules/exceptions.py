@@ -12,20 +12,12 @@ from typing import Any
 from agentcat.types import ChainedErrorData, ErrorData, StackFrame
 from agentcat.modules.constants import MAX_EXCEPTION_CHAIN_DEPTH, MAX_STACK_FRAMES
 
+# str(value) that never raises (exceptions may have a broken __str__).
+from agentcat.modules.logging import safe_error_string as _safe_str
+
 _captured_error: contextvars.ContextVar[BaseException | None] = contextvars.ContextVar(
     "_captured_error", default=None
 )
-
-
-def _safe_str(value: Any) -> str:
-    """str(value) that never raises (exceptions may have a broken __str__)."""
-    try:
-        return str(value)
-    except Exception:
-        try:
-            return f"<unprintable {type(value).__name__} instance>"
-        except Exception:
-            return "<unprintable error>"
 
 
 def capture_exception(exc: BaseException | Any) -> ErrorData:
