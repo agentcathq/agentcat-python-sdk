@@ -15,9 +15,10 @@ IDENTITY_CACHE_MAX_SIZE = 1000
 class IdentityCache:
     """Simple LRU cache for session identities.
 
-    Prevents memory leaks by capping at max_size entries. This cache persists
-    across server instance restarts (mirrors the TypeScript SDK's
-    IdentityCache in modules/internal.ts).
+    Provides user_data merge continuity across identify calls for the same
+    session, and persists across server instance restarts (mirrors the
+    TypeScript SDK's IdentityCache in modules/internal.ts). Prevents memory
+    leaks by capping at max_size entries.
     """
 
     def __init__(self, max_size: int = IDENTITY_CACHE_MAX_SIZE):
@@ -48,7 +49,7 @@ class IdentityCache:
 
 
 # Global identity cache shared across all server instances.
-# This prevents duplicate identify events when server objects are recreated.
+# This preserves user_data merge continuity when server objects are recreated.
 _global_identity_cache = IdentityCache()
 
 
@@ -56,15 +57,6 @@ def reset_identity_cache() -> None:
     """Reset the global identity cache (mainly for testing)."""
     global _global_identity_cache
     _global_identity_cache = IdentityCache()
-
-
-def are_identities_equal(a: UserIdentity, b: UserIdentity) -> bool:
-    """Deep comparison of two UserIdentity objects."""
-    if a.user_id != b.user_id:
-        return False
-    if a.user_name != b.user_name:
-        return False
-    return (a.user_data or {}) == (b.user_data or {})
 
 
 def merge_identities(
@@ -94,9 +86,11 @@ async def identify_session(server, request: any, context: any) -> UserIdentity |
     The identify hook may be a sync or an async callable; coroutine results
     are awaited. The resolved identity is merged with the session's previous
     identity (user_id/user_name overwritten, user_data keys merged) and an
-    `agentcat:identify` event is published ONLY when the merged identity
-    differs from the cached one — repeated identical identities do not
-    republish.
+    `agentcat:identify` event is published every time the hook returns an
+    identity; the cache provides merge continuity only. In stateless mode the
+    cache is bypassed entirely (it is keyed on the instance-wide session_id,
+    so caching would merge different actors' user_data together) and the raw
+    identity is published as-is.
 
     Returns the merged UserIdentity, or None if no hook is configured, the
     hook raises, or it returns a non-UserIdentity value.
@@ -119,32 +113,29 @@ async def identify_session(server, request: any, context: any) -> UserIdentity |
 
         session_id = data.session_id
 
-        # Check the global cache (works across server instance restarts)
-        previous_identity = _global_identity_cache.get(session_id)
+        if data.is_stateless:
+            # Stateless mode: the merge cache is keyed on the instance-wide
+            # session_id, so different actors' user_data would merge together.
+            # Bypass the cache entirely and publish the raw identity.
+            merged_identity = identify_result
+        else:
+            # Check the global cache (works across server instance restarts)
+            previous_identity = _global_identity_cache.get(session_id)
 
-        # Merge identities (overwrite user_id/user_name, merge user_data)
-        merged_identity = merge_identities(previous_identity, identify_result)
+            # Merge identities (overwrite user_id/user_name, merge user_data)
+            merged_identity = merge_identities(previous_identity, identify_result)
 
-        # Only publish if the identity has changed
-        has_changed = previous_identity is None or not are_identities_equal(
-            previous_identity, merged_identity
+            _global_identity_cache.set(session_id, merged_identity)
+
+        event = UnredactedEvent(
+            session_id=session_id,
+            timestamp=datetime.now(timezone.utc),
+            event_type=EventType.AGENTCAT_IDENTIFY.value,
+            identify_actor_given_id=merged_identity.user_id,
+            identify_actor_name=merged_identity.user_name,
+            identify_data=merged_identity.user_data or {},
         )
-
-        _global_identity_cache.set(session_id, merged_identity)
-
-        if has_changed:
-            write_to_log(
-                f"Identified session {session_id} (actor: {merged_identity.user_id})"
-            )
-            event = UnredactedEvent(
-                session_id=session_id,
-                timestamp=datetime.now(timezone.utc),
-                event_type=EventType.AGENTCAT_IDENTIFY.value,
-                identify_actor_given_id=merged_identity.user_id,
-                identify_actor_name=merged_identity.user_name,
-                identify_data=merged_identity.user_data or {},
-            )
-            event_queue.publish_event(server, event)
+        event_queue.publish_event(server, event)
 
         return merged_identity
     except Exception as e:

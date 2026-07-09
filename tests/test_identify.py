@@ -1,8 +1,9 @@
-"""Tests for identify: async hooks, change detection, and identity merging.
+"""Tests for identify: async hooks, per-request publishing, and identity merging.
 
-Mirrors the TypeScript SDK's handleIdentify (src/modules/internal.ts): the
-identify hook runs per-request but an `agentcat:identify` event is published
-only when the (merged) identity actually changed for the session.
+An `agentcat:identify` event is published every time the identify hook returns
+a valid identity — no change-detection dedup. The IdentityCache LRU is retained
+solely for user_data merge continuity across calls (and across server-object
+recreation): user_id/user_name are overwritten, user_data keys accumulate.
 """
 
 from datetime import datetime, timezone
@@ -10,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 from agentcat.modules.identify import (
     IdentityCache,
-    are_identities_equal,
     identify_session,
     merge_identities,
     reset_identity_cache,
@@ -34,7 +34,7 @@ def _identify_events(mock_event_queue):
 
 
 class TestIdentifySession:
-    """Change-detection and merge behavior of identify_session."""
+    """Publish-every-time and merge behavior of identify_session."""
 
     def setup_method(self):
         reset_all_tracking_data()
@@ -57,9 +57,9 @@ class TestIdentifySession:
         return data
 
     @patch("agentcat.modules.identify.event_queue")
-    async def test_identical_identity_publishes_single_event(self, mock_event_queue):
-        """Repeated identical identities → identify hook runs each time but
-        only ONE agentcat:identify event is published."""
+    async def test_identical_identity_publishes_every_time(self, mock_event_queue):
+        """Repeated identical identities → the identify hook runs each time
+        and an agentcat:identify event is published each time."""
         identify_fn = MagicMock(
             side_effect=lambda req, ctx: UserIdentity(
                 user_id="alice", user_name="Alice", user_data={"plan": "pro"}
@@ -73,11 +73,14 @@ class TestIdentifySession:
             assert result.user_id == "alice"
 
         assert identify_fn.call_count == 3
-        assert len(_identify_events(mock_event_queue)) == 1
+        events = _identify_events(mock_event_queue)
+        assert len(events) == 3
+        assert all(e.identify_actor_given_id == "alice" for e in events)
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_changed_identity_publishes_new_event(self, mock_event_queue):
-        """A changed identity → a new agentcat:identify event."""
+        """Every hook return publishes; a changed identity carries the new
+        user_id in its event."""
         identities = iter(
             [
                 UserIdentity(user_id="alice", user_name="Alice", user_data=None),
@@ -92,15 +95,17 @@ class TestIdentifySession:
         result = await identify_session(self.server, MagicMock(), MagicMock())
 
         events = _identify_events(mock_event_queue)
-        assert len(events) == 2
+        assert len(events) == 3
         assert events[0].identify_actor_given_id == "alice"
-        assert events[1].identify_actor_given_id == "bob"
+        assert events[1].identify_actor_given_id == "alice"
+        assert events[2].identify_actor_given_id == "bob"
         assert result.user_id == "bob"
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_user_data_merges_across_calls(self, mock_event_queue):
         """user_id/user_name are overwritten; user_data keys are merged with
-        the newest values winning on collision."""
+        the newest values winning on collision. Each call publishes an event
+        carrying the merged identity."""
         identities = iter(
             [
                 UserIdentity(
@@ -130,11 +135,10 @@ class TestIdentifySession:
         assert events[1].identify_data == {"plan": "pro", "region": "us"}
 
     @patch("agentcat.modules.identify.event_queue")
-    async def test_merged_but_unchanged_identity_does_not_republish(
-        self, mock_event_queue
-    ):
+    async def test_merged_unchanged_identity_republishes(self, mock_event_queue):
         """A subset of previously-seen user_data merges into an identical
-        identity → no new event."""
+        identity → still republished, and the second event carries the FULL
+        merged identity (merge continuity + publish-every-time)."""
         identities = iter(
             [
                 UserIdentity(
@@ -149,7 +153,10 @@ class TestIdentifySession:
         result = await identify_session(self.server, MagicMock(), MagicMock())
 
         assert result.user_data == {"a": "1", "b": "2"}
-        assert len(_identify_events(mock_event_queue)) == 1
+        events = _identify_events(mock_event_queue)
+        assert len(events) == 2
+        assert events[1].identify_actor_given_id == "alice"
+        assert events[1].identify_data == {"a": "1", "b": "2"}
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_async_identify_callback(self, mock_event_queue):
@@ -190,8 +197,8 @@ class TestIdentifySession:
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_new_session_republishes_identity(self, mock_event_queue):
-        """Identity cache is keyed per session — a new session ID publishes
-        again even for an identical identity."""
+        """Merge cache is keyed per session — a new session ID starts with no
+        previous identity and publishes on its first identify too."""
         identify_fn = lambda req, ctx: UserIdentity(  # noqa: E731
             user_id="alice", user_name="Alice", user_data=None
         )
@@ -206,27 +213,7 @@ class TestIdentifySession:
 
 
 class TestIdentityHelpers:
-    """Unit tests for merge/equality helpers and the LRU cache."""
-
-    def test_are_identities_equal(self):
-        a = UserIdentity(user_id="u", user_name="n", user_data={"k": "v"})
-        b = UserIdentity(user_id="u", user_name="n", user_data={"k": "v"})
-        assert are_identities_equal(a, b)
-
-        assert not are_identities_equal(
-            a, UserIdentity(user_id="x", user_name="n", user_data={"k": "v"})
-        )
-        assert not are_identities_equal(
-            a, UserIdentity(user_id="u", user_name="x", user_data={"k": "v"})
-        )
-        assert not are_identities_equal(
-            a, UserIdentity(user_id="u", user_name="n", user_data={"k": "other"})
-        )
-        # None and {} user_data are equivalent
-        assert are_identities_equal(
-            UserIdentity(user_id="u", user_name="n", user_data=None),
-            UserIdentity(user_id="u", user_name="n", user_data={}),
-        )
+    """Unit tests for the merge helper and the LRU cache."""
 
     def test_merge_identities_no_previous(self):
         nxt = UserIdentity(user_id="u", user_name="n", user_data={"k": "v"})

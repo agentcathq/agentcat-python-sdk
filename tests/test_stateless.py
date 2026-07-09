@@ -16,6 +16,15 @@ from agentcat.types import AgentCatData, AgentCatOptions, SessionInfo, UserIdent
 from .test_utils.todo_server import create_todo_server
 
 
+def _identify_events(mock_event_queue):
+    """Extract agentcat:identify events passed to the mocked publish_event."""
+    return [
+        call.args[1]
+        for call in mock_event_queue.publish_event.call_args_list
+        if call.args[1].event_type == "agentcat:identify"
+    ]
+
+
 def _make_identify_fn(user_id="user_123", user_name="Test User"):
     """Return an identify function that always returns a UserIdentity."""
     def identify(request, context):
@@ -62,7 +71,8 @@ class TestStatelessMode:
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_stateless_identify_runs_every_time(self, mock_event_queue):
-        """In stateless mode, identify should run on every call (no early-return guard)."""
+        """In stateless mode, identify should run on every call (no early-return guard)
+        and an agentcat:identify event should be published per request."""
         mock_fn = MagicMock(return_value=UserIdentity(
             user_id="alice", user_name="Alice", user_data=None
         ))
@@ -72,6 +82,42 @@ class TestStatelessMode:
         await identify_session(self.server, MagicMock(), MagicMock())
 
         assert mock_fn.call_count == 2
+        events = _identify_events(mock_event_queue)
+        assert len(events) == 2
+        assert all(e.identify_actor_given_id == "alice" for e in events)
+
+    @patch("agentcat.modules.identify.event_queue")
+    async def test_stateless_no_cross_request_identity_merge(self, mock_event_queue):
+        """In stateless mode the merge cache is bypassed: different actors on
+        consecutive requests must each get their own raw identity, with no
+        user_data bleeding between them."""
+        identities = iter(
+            [
+                UserIdentity(
+                    user_id="alice", user_name="Alice", user_data={"plan": "pro"}
+                ),
+                UserIdentity(
+                    user_id="bob", user_name="Bob", user_data={"region": "eu"}
+                ),
+            ]
+        )
+        self._setup_data(stateless=True, identify=lambda req, ctx: next(identities))
+
+        result1 = await identify_session(self.server, MagicMock(), MagicMock())
+        result2 = await identify_session(self.server, MagicMock(), MagicMock())
+
+        # Returned identities are the raw per-request identities (no merge)
+        assert result1.user_id == "alice"
+        assert result1.user_data == {"plan": "pro"}
+        assert result2.user_id == "bob"
+        assert result2.user_data == {"region": "eu"}
+
+        events = _identify_events(mock_event_queue)
+        assert len(events) == 2
+        assert events[0].identify_actor_given_id == "alice"
+        assert events[0].identify_data == {"plan": "pro"}
+        assert events[1].identify_actor_given_id == "bob"
+        assert events[1].identify_data == {"region": "eu"}
 
     @patch("agentcat.modules.identify.event_queue")
     async def test_stateless_identify_returns_identity(self, mock_event_queue):

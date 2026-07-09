@@ -204,7 +204,7 @@ class TestRequestPathHostileCallbacks:
     @patch("agentcat.modules.identify.event_queue")
     @patch("agentcat.modules.overrides.mcp_server.event_queue")
     async def test_identify_user_data_with_raising_eq(self, mock_eq, mock_id_eq):
-        """Change-detection deep-compares arbitrary user_data; values whose
+        """Identity merging handles arbitrary user_data; values whose
         __eq__ raises must not break the second request."""
 
         def identify(request, extra):
@@ -214,7 +214,7 @@ class TestRequestPathHostileCallbacks:
 
         server = _setup_lowlevel_server(identify=identify)
         result1 = await self._call(server)
-        result2 = await self._call(server)  # triggers are_identities_equal
+        result2 = await self._call(server)  # merges with the cached identity
         assert not getattr(result1.root, "isError", False)
         assert not getattr(result2.root, "isError", False)
 
