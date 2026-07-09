@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 import mcp.types as mt
@@ -33,6 +34,14 @@ from agentcat.types import EventType, AgentCatData, UnredactedEvent
 if TYPE_CHECKING:
     from fastmcp.server.middleware import CallNext, MiddlewareContext
     from fastmcp.tools.tool import Tool, ToolResult
+
+
+def _fastmcp_version() -> str:
+    """Best-effort resolved fastmcp version for diagnostics; never throws."""
+    try:
+        return version("fastmcp")
+    except Exception:
+        return "unknown"
 
 
 class AgentCatMiddleware:
@@ -387,10 +396,20 @@ class AgentCatMiddleware:
                 modified_tools.append(tool)
                 continue
 
+            # Only the parameters schema (a plain dict) is mutated below, so copy
+            # just that — never the whole Tool. Deep-copying the Tool drags in
+            # non-picklable fields it may hold (e.g. an httpx.AsyncClient with a
+            # threading.RLock on OpenAPI-generated tools), which raised
+            # "cannot pickle '_thread.RLock' object" and silently dropped context
+            # injection on every tools/list.
             try:
-                tool_copy = copy.deepcopy(tool)
+                tool_copy = tool.model_copy(
+                    update={"parameters": copy.deepcopy(getattr(tool, "parameters", None))}
+                )
             except Exception as e:
-                write_to_log(f"Error copying tool {tool.name}: {e}")
+                write_to_log(
+                    f"Error copying tool {tool.name} (fastmcp {_fastmcp_version()}): {e}"
+                )
                 modified_tools.append(tool)
                 continue
 
