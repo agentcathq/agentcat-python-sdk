@@ -9,6 +9,8 @@ unchanged.
 from datetime import date, datetime
 from typing import Any, TYPE_CHECKING
 
+import pydantic_core
+
 if TYPE_CHECKING:
     from agentcat.types import UnredactedEvent
 
@@ -22,6 +24,24 @@ MIN_DEPTH = 1               # Never reduce depth below this to avoid type mismat
 
 # Only these fields get truncated; all other top-level event fields pass through untouched.
 TRUNCATABLE_FIELDS = {"parameters", "response", "error", "identify_data", "user_intent", "additional_properties"}
+
+
+def make_json_safe(value: Any) -> Any:
+    """Best-effort conversion of *value* into JSON-serializable primitives.
+
+    Callables become their ``repr``, sets/tuples become lists, ``datetime``/``date``
+    become ISO strings, and any other unknown object falls back to ``str``. Never
+    raises. This is what keeps a non-JSON-safe value in an event payload (a tool's
+    ``fn`` callable, a ``set`` of tags, a custom object) from either aborting
+    truncation or being silently dropped by the API client on send.
+    """
+    try:
+        return pydantic_core.to_jsonable_python(value, fallback=str)
+    except Exception:
+        try:
+            return str(value)
+        except Exception:
+            return None
 
 
 def _truncate_string(value: str, max_bytes: int = MAX_STRING_BYTES) -> str:
@@ -135,8 +155,18 @@ def truncate_event(event: "UnredactedEvent | None") -> "UnredactedEvent | None":
     if event is None:
         return None
 
+    # Coerce payload fields to JSON-safe primitives up front. This both lets the
+    # size checks below serialize cleanly and — because the API client re-serializes
+    # this same event object on send — prevents a non-serializable value (a callable,
+    # a set, a datetime, a custom object) from silently dropping the event downstream.
+    # The event reaching here is already a copy (see sanitize_event), so mutation is safe.
+    for field_name in TRUNCATABLE_FIELDS:
+        value = getattr(event, field_name, None)
+        if value is not None and not isinstance(value, (str, int, float, bool)):
+            setattr(event, field_name, make_json_safe(value))
+
     try:
-        serialized_bytes = event.model_dump_json().encode("utf-8")
+        serialized_bytes = event.model_dump_json(fallback=str).encode("utf-8")
         byte_size = len(serialized_bytes)
         if byte_size <= MAX_EVENT_BYTES:
             return event
@@ -167,7 +197,7 @@ def truncate_event(event: "UnredactedEvent | None") -> "UnredactedEvent | None":
                             max_breadth=breadth,
                         )
             candidate = event_cls.model_validate(event_dict)
-            result_bytes = len(candidate.model_dump_json().encode("utf-8"))
+            result_bytes = len(candidate.model_dump_json(fallback=str).encode("utf-8"))
             if result_bytes <= MAX_EVENT_BYTES:
                 return candidate
             write_to_log(
