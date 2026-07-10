@@ -20,7 +20,7 @@ from ..types import Event, UnredactedEvent
 from ..utils import generate_prefixed_ksuid
 from .compatibility import get_mcp_compatible_error_message
 from .internal import get_server_tracking_data
-from .logging import write_to_log
+from .logging import safe_error_string, write_to_log
 from .redaction import redact_event
 from .sanitization import sanitize_event
 from .truncation import truncate_event
@@ -115,8 +115,10 @@ class EventQueue:
                 event = redacted_event
                 event.redaction_fn = None  # Clear the function to avoid reprocessing
             except Exception as error:
+                # safe_error_string: the error comes from the customer's
+                # redaction function and may have a broken __str__.
                 write_to_log(
-                    f"WARNING: Dropping event {event.id or 'unknown'} due to redaction failure: {error}"
+                    f"WARNING: Dropping event {event.id or 'unknown'} due to redaction failure: {safe_error_string(error)}"
                 )
                 return  # Skip this event if redaction fails
 
@@ -287,40 +289,54 @@ atexit.register(lambda: event_queue.destroy())
 
 
 def publish_event(server: Any, event: UnredactedEvent) -> None:
-    """Publish an event to the queue."""
-    if not event.duration:
-        if event.timestamp:
-            event.duration = int(
-                (datetime.now(timezone.utc).timestamp() - event.timestamp.timestamp())
-                * 1000
+    """Publish an event to the queue.
+
+    Never raises: this is called from the customer's request path (tool-call
+    and initialize wrappers). Any failure degrades to a dropped event plus a
+    log line.
+    """
+    try:
+        if not event.duration:
+            if event.timestamp:
+                event.duration = int(
+                    (
+                        datetime.now(timezone.utc).timestamp()
+                        - event.timestamp.timestamp()
+                    )
+                    * 1000
+                )
+            else:
+                event.duration = None
+
+        data = get_server_tracking_data(server)
+        if not data:
+            write_to_log(
+                "Warning: Server tracking data not found. Event will not be published."
             )
-        else:
-            event.duration = None
+            return
 
-    data = get_server_tracking_data(server)
-    if not data:
-        write_to_log(
-            "Warning: Server tracking data not found. Event will not be published."
+        session_info = get_session_info(server, data)
+
+        # Create full event with all required fields
+        # Merge event data with session info
+        event_data = event.model_dump(exclude_none=True)
+        session_data = session_info.model_dump(exclude_none=True)
+
+        # Merge data, ensuring project_id from data takes precedence
+        merged_data = {**event_data, **session_data}
+        merged_data["project_id"] = (
+            data.project_id
+        )  # Override with tracking data's project_id
+
+        full_event = UnredactedEvent(
+            **merged_data,
+            redaction_fn=data.options.redact_sensitive_information,
         )
-        return
 
-    session_info = get_session_info(server, data)
-
-    # Create full event with all required fields
-    # Merge event data with session info
-    event_data = event.model_dump(exclude_none=True)
-    session_data = session_info.model_dump(exclude_none=True)
-
-    # Merge data, ensuring project_id from data takes precedence
-    merged_data = {**event_data, **session_data}
-    merged_data["project_id"] = (
-        data.project_id
-    )  # Override with tracking data's project_id
-
-    full_event = UnredactedEvent(
-        **merged_data,
-        redaction_fn=data.options.redact_sensitive_information,
-    )
-
-    set_last_activity(server)
-    event_queue.add(full_event)
+        set_last_activity(server)
+        event_queue.add(full_event)
+    except Exception as e:
+        write_to_log(
+            f"WARNING: Dropping event {getattr(event, 'id', None) or 'unknown'} — "
+            f"publish failed: {safe_error_string(e)}"
+        )

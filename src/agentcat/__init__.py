@@ -9,7 +9,11 @@ from typing import Any
 __version__ = version("agentcat")
 
 from agentcat.modules.overrides.mcp_server import override_lowlevel_mcp_server
-from agentcat.modules.session import get_session_info, new_session_id
+from agentcat.modules.session import (
+    derive_session_id_from_mcp_session,
+    get_session_info,
+    new_session_id,
+)
 
 from .modules.compatibility import (
     COMPATIBILITY_ERROR_MESSAGE,
@@ -18,16 +22,20 @@ from .modules.compatibility import (
     is_compatible_server,
     is_official_fastmcp_server,
 )
+from .modules.constants import AGENTCAT_CUSTOM_EVENT_TYPE
 from .modules.diagnostics import init_diagnostics
-from .modules.internal import set_server_tracking_data
+from .modules.internal import get_server_tracking_data, set_server_tracking_data
 from .modules.logging import set_debug_mode, write_to_log
+from .modules.validation import validate_tags
 from .types import (
+    CustomEventData,
     EventPropertiesFunction,
     EventTagsFunction,
     IdentifyFunction,
     AgentCatData,
     AgentCatOptions,
     RedactionFunction,
+    UnredactedEvent,
     UserIdentity,
 )
 
@@ -248,9 +256,114 @@ def _apply_server_tracking(
         override_lowlevel_mcp_server(lowlevel_server, data)
 
 
+def publish_custom_event(
+    server_or_session_id: Any,
+    project_id: str,
+    event_data: CustomEventData | None = None,
+) -> None:
+    """
+    Publish a custom event to AgentCat with flexible session management.
+
+    Args:
+        server_or_session_id: Either a tracked MCP server instance or an MCP
+            session ID string. For a session ID string, a deterministic
+            AgentCat session ID is derived so the same inputs always correlate
+            to the same session.
+        project_id: Your AgentCat project ID (required)
+        event_data: Optional event data to include with the custom event
+
+    Raises:
+        ValueError: If project_id is missing, or the server is not tracked
+        TypeError: If the first parameter is neither a server nor a string
+
+    Example:
+        >>> import agentcat
+        >>> data = agentcat.CustomEventData(
+        ...     resource_name="custom-action",
+        ...     parameters={"action": "user-feedback", "rating": 5},
+        ...     message="User provided feedback",
+        ... )
+        >>> agentcat.publish_custom_event(server, "proj_abc123", data)
+    """
+    from agentcat.modules import event_queue as event_queue_module
+
+    # Normalize once: an omitted payload behaves like an all-defaults payload.
+    event_data = event_data or CustomEventData()
+
+    if not project_id:
+        raise ValueError("project_id is required for publish_custom_event")
+
+    tracked_server: Any | None = None
+
+    if isinstance(server_or_session_id, str):
+        # Custom session ID provided - derive a deterministic session ID
+        session_id = derive_session_id_from_mcp_session(
+            server_or_session_id, project_id
+        )
+    elif server_or_session_id is not None and not isinstance(
+        server_or_session_id, (int, float, bool)
+    ):
+        try:
+            data = get_server_tracking_data(server_or_session_id)
+        except TypeError:
+            # Non-weakref-able / unhashable objects can't be tracked servers;
+            # surface the documented "not tracked" error instead of leaking a
+            # WeakKeyDictionary internal TypeError.
+            data = None
+        if data is None:
+            # Server is not tracked - treat it as an error
+            raise ValueError(
+                "Server is not tracked. Please call agentcat.track() first or "
+                "provide a session ID string."
+            )
+        # Use the tracked server's session ID and configuration
+        tracked_server = server_or_session_id
+        session_id = data.session_id
+    else:
+        raise TypeError(
+            "First parameter must be either an MCP server object or a session ID string"
+        )
+
+    event = UnredactedEvent(
+        # Core fields
+        session_id=session_id,
+        project_id=project_id,
+        # Fixed event type for custom events
+        event_type=AGENTCAT_CUSTOM_EVENT_TYPE,
+        timestamp=datetime.now(timezone.utc),
+        # Event data from parameters
+        resource_name=event_data.resource_name,
+        parameters=event_data.parameters,
+        response=event_data.response,
+        user_intent=event_data.message,
+        duration=event_data.duration,
+        is_error=event_data.is_error,
+        error=event_data.error,
+    )
+
+    # Wire up customer-defined metadata
+    if event_data.tags:
+        event.tags = validate_tags(event_data.tags)
+    if event_data.properties:
+        event.properties = event_data.properties
+
+    # If we have a tracked server, publish through it (merges session info and
+    # redaction config); otherwise add directly to the event queue.
+    if tracked_server is not None:
+        event_queue_module.publish_event(tracked_server, event)
+    else:
+        event_queue_module.event_queue.add(event)
+
+    write_to_log(
+        f"Published custom event for session {session_id} with type "
+        f"'{AGENTCAT_CUSTOM_EVENT_TYPE}'"
+    )
+
+
 __all__ = [
     # Main API
     "track",
+    "publish_custom_event",
     # Configuration
     "AgentCatOptions",
     # Types for identify functionality
@@ -261,4 +374,6 @@ __all__ = [
     # Types for event metadata callbacks
     "EventTagsFunction",
     "EventPropertiesFunction",
+    # Type for custom events
+    "CustomEventData",
 ]

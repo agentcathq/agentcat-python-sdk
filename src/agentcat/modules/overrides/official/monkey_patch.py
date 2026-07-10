@@ -28,7 +28,7 @@ from agentcat.modules.internal import (
     register_tool,
     store_original_method,
 )
-from agentcat.modules.logging import write_to_log
+from agentcat.modules.logging import safe_error_string, write_to_log
 from agentcat.modules.request_extra import params_with_extra
 from agentcat.modules.session import (
     get_client_info_from_request_context,
@@ -263,7 +263,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
                         },
                     )()
 
-                    identity = identify_session(server._mcp_server, mock_request, request_context)
+                    identity = await identify_session(server._mcp_server, mock_request, request_context)
                 except Exception as e:
                     client_name, client_version = None, None
                     identity = None
@@ -389,7 +389,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
 
             except Exception as e:
                 # Log the error
-                write_to_log(f"Error in patched_call_tool: {e}")
+                write_to_log(f"Error in patched_call_tool: {safe_error_string(e)}")
 
                 # Try to mark event as error if it exists
                 if event:
@@ -402,7 +402,7 @@ def patch_fastmcp_tool_manager(server: Any, agentcat_data: AgentCatData) -> bool
                         write_to_log(f"Error capturing exception: {capture_err}")
                         try:
                             event.error = {
-                                "message": str(e),
+                                "message": safe_error_string(e),
                                 "type": type(e).__name__,
                                 "platform": "python",
                             }

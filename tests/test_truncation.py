@@ -16,6 +16,12 @@ from agentcat.modules.truncation import (
     MAX_EVENT_BYTES,
     MIN_DEPTH,
     TRUNCATABLE_FIELDS,
+    MAX_USER_INTENT_LENGTH,
+    MAX_ERROR_MESSAGE_LENGTH,
+    MAX_RESOURCE_NAME_LENGTH,
+    MAX_METADATA_LENGTH,
+    MAX_STACK_FRAMES,
+    MAX_CONTENT_TEXT_LENGTH,
 )
 from agentcat.types import UnredactedEvent
 
@@ -50,8 +56,8 @@ class TestStringTruncation:
         assert len(result.encode("utf-8")) < len(original.encode("utf-8"))
 
     def test_utf8_multibyte_truncated_by_bytes_no_broken_codepoints(self):
-        # Each emoji is 4 bytes. 2560 emojis = 10,240 bytes = exactly at limit
-        s = "\U0001f600" * 2561  # 10,244 bytes — just over limit
+        # Each emoji is 4 bytes. 8192 emojis = 32,768 bytes = exactly at limit
+        s = "\U0001f600" * 8193  # 32,772 bytes — just over limit
         result = _truncate_value(s)
         byte_size = len(s.encode("utf-8"))
         assert f"[string truncated by AgentCat from {byte_size} bytes]" in result
@@ -207,8 +213,12 @@ class TestSizeGuarantee:
         assert result_bytes <= MAX_EVENT_BYTES
 
     def test_many_large_strings_under_limit(self):
-        """20 strings of 10 KB each = 200 KB of strings before truncation."""
-        params = {f"key_{i}": "x" * 20_000 for i in range(20)}
+        """20 strings of 40 KB each = 800 KB of strings before truncation.
+
+        Each string exceeds MAX_STRING_BYTES so per-string truncation
+        applies on the first pass.
+        """
+        params = {f"key_{i}": "x" * 40_000 for i in range(20)}
         event = _make_event(parameters=params)
         result = truncate_event(event)
         result_bytes = len(result.model_dump_json().encode("utf-8"))
@@ -226,10 +236,10 @@ class TestSizeGuarantee:
 
     def test_depth_reduces_progressively(self):
         """Verify depth reduction kicks in when first pass isn't enough."""
-        # Build a structure that's over 100 KB even after depth=5 truncation
-        # 20 keys * 10 KB string = 200 KB at each level, nested 5 deep
+        # Build a structure that's over 100 KB even after the first pass at
+        # MAX_DEPTH: 20 keys * 10 KB string = 200 KB leaf, nested MAX_DEPTH deep
         level = {f"k{i}": "x" * 10_000 for i in range(20)}
-        for _ in range(5):
+        for _ in range(MAX_DEPTH):
             level = {"nested": level, "extra": "x" * 10_000}
         event = _make_event(parameters=level)
         result = truncate_event(event)
@@ -557,3 +567,168 @@ class TestMetadataProtection:
         assert "truncated by AgentCat" in result.user_intent
         result_bytes = len(result.model_dump_json().encode("utf-8"))
         assert result_bytes <= MAX_EVENT_BYTES
+
+
+class TestFieldLevelCaps:
+    """Field-level caps run unconditionally on every event, even ones far
+    under the 100 KB budget (parity with the TypeScript SDK's layer 1)."""
+
+    # --- user_intent -> 2048 ---
+
+    def test_user_intent_over_cap_truncated_with_marker(self):
+        event = _make_event(user_intent="x" * (MAX_USER_INTENT_LENGTH + 100))
+        result = truncate_event(event)
+        assert result is not event
+        assert len(result.user_intent.encode("utf-8")) <= MAX_USER_INTENT_LENGTH
+        assert "truncated by AgentCat" in result.user_intent
+
+    def test_user_intent_under_cap_untouched(self):
+        intent = "x" * MAX_USER_INTENT_LENGTH
+        event = _make_event(user_intent=intent)
+        result = truncate_event(event)
+        assert result.user_intent == intent
+
+    # --- error.message -> 2048 ---
+
+    def test_error_message_over_cap_truncated_with_marker(self):
+        event = _make_event(
+            error={"message": "e" * (MAX_ERROR_MESSAGE_LENGTH + 100), "platform": "python"}
+        )
+        result = truncate_event(event)
+        assert len(result.error["message"].encode("utf-8")) <= MAX_ERROR_MESSAGE_LENGTH
+        assert "truncated by AgentCat" in result.error["message"]
+        # Sibling fields survive
+        assert result.error["platform"] == "python"
+
+    def test_error_message_under_cap_untouched(self):
+        message = "e" * MAX_ERROR_MESSAGE_LENGTH
+        event = _make_event(error={"message": message, "platform": "python"})
+        result = truncate_event(event)
+        assert result.error["message"] == message
+
+    # --- resource_name -> 256 ---
+
+    def test_resource_name_over_cap_truncated_with_marker(self):
+        event = _make_event(resource_name="r" * (MAX_RESOURCE_NAME_LENGTH + 50))
+        result = truncate_event(event)
+        assert len(result.resource_name.encode("utf-8")) <= MAX_RESOURCE_NAME_LENGTH
+        assert "truncated by AgentCat" in result.resource_name
+
+    def test_resource_name_under_cap_untouched(self):
+        name = "r" * MAX_RESOURCE_NAME_LENGTH
+        event = _make_event(resource_name=name)
+        result = truncate_event(event)
+        assert result.resource_name == name
+
+    # --- server/client metadata -> 256 ---
+
+    @pytest.mark.parametrize(
+        "field_name",
+        ["server_name", "server_version", "client_name", "client_version"],
+    )
+    def test_metadata_field_over_cap_truncated_with_marker(self, field_name):
+        event = _make_event(**{field_name: "m" * (MAX_METADATA_LENGTH + 50)})
+        result = truncate_event(event)
+        value = getattr(result, field_name)
+        assert len(value.encode("utf-8")) <= MAX_METADATA_LENGTH
+        assert "truncated by AgentCat" in value
+
+    @pytest.mark.parametrize(
+        "field_name",
+        ["server_name", "server_version", "client_name", "client_version"],
+    )
+    def test_metadata_field_under_cap_untouched(self, field_name):
+        value = "m" * MAX_METADATA_LENGTH
+        event = _make_event(**{field_name: value})
+        result = truncate_event(event)
+        assert getattr(result, field_name) == value
+
+    # --- error.frames -> max 50, keep first 25 + last 25 ---
+
+    def test_frames_over_cap_keep_first_25_and_last_25(self):
+        frames = [
+            {"filename": f"file_{i}.py", "function": f"fn_{i}", "lineno": i}
+            for i in range(80)
+        ]
+        event = _make_event(error={"message": "boom", "frames": frames})
+        result = truncate_event(event)
+        trimmed = result.error["frames"]
+        assert len(trimmed) == MAX_STACK_FRAMES
+        assert trimmed[:25] == frames[:25]
+        assert trimmed[25:] == frames[-25:]
+
+    def test_frames_at_cap_untouched(self):
+        frames = [
+            {"filename": f"file_{i}.py", "function": f"fn_{i}", "lineno": i}
+            for i in range(MAX_STACK_FRAMES)
+        ]
+        event = _make_event(error={"message": "boom", "frames": frames})
+        result = truncate_event(event)
+        assert result.error["frames"] == frames
+
+    # --- response content text blocks -> 32 KB each ---
+
+    def test_content_text_block_over_cap_truncated_with_marker(self):
+        big_text = "t" * (MAX_CONTENT_TEXT_LENGTH + 1_000)
+        event = _make_event(
+            response={"content": [{"type": "text", "text": big_text}]}
+        )
+        result = truncate_event(event)
+        block = result.response["content"][0]
+        assert block["type"] == "text"
+        assert len(block["text"].encode("utf-8")) <= MAX_CONTENT_TEXT_LENGTH
+        assert "truncated by AgentCat" in block["text"]
+
+    def test_content_text_block_under_cap_untouched(self):
+        text = "t" * 1_000
+        event = _make_event(
+            response={"content": [{"type": "text", "text": text}]}
+        )
+        result = truncate_event(event)
+        assert result.response["content"][0]["text"] == text
+
+    def test_non_text_content_blocks_untouched(self):
+        blocks = [
+            {"type": "image", "data": "abc", "mimeType": "image/png"},
+            {"type": "text", "text": "t" * (MAX_CONTENT_TEXT_LENGTH + 500)},
+        ]
+        event = _make_event(response={"content": blocks})
+        result = truncate_event(event)
+        assert result.response["content"][0] == blocks[0]
+        assert "truncated by AgentCat" in result.response["content"][1]["text"]
+
+    # --- layering / general behavior ---
+
+    def test_caps_apply_even_when_event_far_under_budget(self):
+        """Field caps are unconditional — a tiny event with one over-cap field
+        is still truncated, unlike the old budget-only behavior."""
+        event = _make_event(user_intent="x" * 5_000)  # event well under 100 KB
+        assert len(event.model_dump_json().encode("utf-8")) <= MAX_EVENT_BYTES
+        result = truncate_event(event)
+        assert result is not event
+        assert len(result.user_intent.encode("utf-8")) <= MAX_USER_INTENT_LENGTH
+
+    def test_event_with_no_over_cap_fields_returned_same_object(self):
+        event = _make_event(
+            user_intent="short",
+            server_name="srv",
+            error={"message": "boom", "frames": [{"filename": "a.py"}]},
+            response={"content": [{"type": "text", "text": "ok"}]},
+        )
+        result = truncate_event(event)
+        assert result is event
+
+    def test_original_event_not_mutated_by_field_caps(self):
+        frames = [{"filename": f"f{i}.py"} for i in range(80)]
+        error = {"message": "m" * (MAX_ERROR_MESSAGE_LENGTH + 100), "frames": frames}
+        response = {"content": [{"type": "text", "text": "t" * (MAX_CONTENT_TEXT_LENGTH + 100)}]}
+        event = _make_event(
+            user_intent="x" * (MAX_USER_INTENT_LENGTH + 100),
+            error=error,
+            response=response,
+        )
+        truncate_event(event)
+        assert len(event.user_intent) == MAX_USER_INTENT_LENGTH + 100
+        assert len(event.error["message"]) == MAX_ERROR_MESSAGE_LENGTH + 100
+        assert len(event.error["frames"]) == 80
+        assert len(event.response["content"][0]["text"]) == MAX_CONTENT_TEXT_LENGTH + 100

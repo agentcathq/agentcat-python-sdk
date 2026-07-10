@@ -15,10 +15,19 @@ if TYPE_CHECKING:
 from .logging import write_to_log
 
 MAX_EVENT_BYTES = 102_400   # 100 KB total event size
-MAX_STRING_BYTES = 10_240   # 10 KB per individual string
-MAX_DEPTH = 5               # Max nesting depth for dicts/lists
-MAX_BREADTH = 500           # Max items per dict/list
+MAX_STRING_BYTES = 32_768   # 32 KB per individual string
+MAX_DEPTH = 10              # Max nesting depth for dicts/lists
+MAX_BREADTH = 100           # Max items per dict/list
 MIN_DEPTH = 1               # Never reduce depth below this to avoid type mismatches
+
+# Field-level limits (mirrors the TypeScript SDK's field-cap layer).
+# Applied unconditionally to every event, before the size-budget pass.
+MAX_USER_INTENT_LENGTH = 2_048      # user_intent
+MAX_ERROR_MESSAGE_LENGTH = 2_048    # error.message
+MAX_RESOURCE_NAME_LENGTH = 256      # resource_name
+MAX_METADATA_LENGTH = 256           # server_name/server_version/client_name/client_version
+MAX_STACK_FRAMES = 50               # error.frames — keep first 25 + last 25 when over
+MAX_CONTENT_TEXT_LENGTH = 32_768    # response.content[].text per text block
 
 # Only these fields get truncated; all other top-level event fields pass through untouched.
 TRUNCATABLE_FIELDS = {"parameters", "response", "error", "identify_data", "user_intent", "additional_properties"}
@@ -116,10 +125,116 @@ def _truncate_value(
         _seen.discard(obj_id)
 
 
-def truncate_event(event: "UnredactedEvent | None") -> "UnredactedEvent | None":
-    """Return a truncated copy of *event* if it exceeds MAX_EVENT_BYTES.
+# --- Field-level cap layer (mirrors TypeScript truncateEvent layer 1) ---
 
-    Uses size-targeted normalization strategy: normalize with the
+
+def _truncate_stack_frames(frames: Any) -> Any:
+    """Trim a stack frame list to MAX_STACK_FRAMES, keeping first + last halves."""
+    if not isinstance(frames, list) or len(frames) <= MAX_STACK_FRAMES:
+        return frames
+    half = MAX_STACK_FRAMES // 2
+    return frames[:half] + frames[-half:]
+
+
+def _truncate_response_content(response: Any) -> Any:
+    """Cap each text content block in a response to MAX_CONTENT_TEXT_LENGTH bytes.
+
+    Returns the original object unchanged (same identity) when no block
+    needed truncation.
+    """
+    if not isinstance(response, dict):
+        return response
+    content = response.get("content")
+    if not isinstance(content, list):
+        return response
+
+    changed = False
+    new_content = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
+            capped = _truncate_string(block["text"], max_bytes=MAX_CONTENT_TEXT_LENGTH)
+            if capped != block["text"]:
+                block = {**block, "text": capped}
+                changed = True
+        new_content.append(block)
+
+    if not changed:
+        return response
+    return {**response, "content": new_content}
+
+
+def _apply_field_caps(event: "UnredactedEvent") -> "UnredactedEvent":
+    """Apply per-field limits to an event, returning a copy only if changed.
+
+    Mirrors the TypeScript SDK's field-level truncation layer, which runs
+    unconditionally on every event before the 100 KB size-budget pass:
+    - user_intent -> 2048
+    - error.message -> 2048; error.frames -> first 25 + last 25 when > 50
+    - resource_name -> 256
+    - server_name / server_version / client_name / client_version -> 256
+    - response.content[].text -> 32 KB per text block
+    """
+    updates: dict[str, Any] = {}
+
+    for field_name, limit in (
+        ("user_intent", MAX_USER_INTENT_LENGTH),
+        ("resource_name", MAX_RESOURCE_NAME_LENGTH),
+        ("server_name", MAX_METADATA_LENGTH),
+        ("server_version", MAX_METADATA_LENGTH),
+        ("client_name", MAX_METADATA_LENGTH),
+        ("client_version", MAX_METADATA_LENGTH),
+    ):
+        value = getattr(event, field_name, None)
+        if isinstance(value, str):
+            capped = _truncate_string(value, max_bytes=limit)
+            if capped != value:
+                updates[field_name] = capped
+
+    error = getattr(event, "error", None)
+    if isinstance(error, dict):
+        new_error = dict(error)
+        error_changed = False
+
+        message = new_error.get("message")
+        if isinstance(message, str):
+            capped = _truncate_string(message, max_bytes=MAX_ERROR_MESSAGE_LENGTH)
+            if capped != message:
+                new_error["message"] = capped
+                error_changed = True
+
+        frames = new_error.get("frames")
+        trimmed_frames = _truncate_stack_frames(frames)
+        if trimmed_frames is not frames:
+            new_error["frames"] = trimmed_frames
+            error_changed = True
+
+        if error_changed:
+            updates["error"] = new_error
+
+    response = getattr(event, "response", None)
+    capped_response = _truncate_response_content(response)
+    if capped_response is not response:
+        updates["response"] = capped_response
+
+    if not updates:
+        return event
+    return event.model_copy(update=updates)
+
+
+def truncate_event(event: "UnredactedEvent | None") -> "UnredactedEvent | None":
+    """Apply layered truncation to *event*.
+
+    Layer 1 — field-level caps (unconditional, mirrors the TypeScript SDK):
+    user_intent, resource_name, server/client metadata, error.message,
+    error.frames, and response content text blocks are capped regardless
+    of overall event size.
+
+    Layer 2 — size budget: if the event still exceeds MAX_EVENT_BYTES,
+    uses a size-targeted normalization strategy: normalize with the
     current limits, check JSON byte size, and if still over the limit tighten
     limits and re-normalize until it fits.
 
@@ -136,6 +251,10 @@ def truncate_event(event: "UnredactedEvent | None") -> "UnredactedEvent | None":
         return None
 
     try:
+        # Layer 1: field-level caps, applied to every event unconditionally
+        event = _apply_field_caps(event)
+
+        # Layer 2: overall size budget
         serialized_bytes = event.model_dump_json().encode("utf-8")
         byte_size = len(serialized_bytes)
         if byte_size <= MAX_EVENT_BYTES:

@@ -8,6 +8,7 @@ from mcp.shared.context import RequestContext
 
 from agentcat.modules import event_queue
 from agentcat.modules.compatibility import is_mcp_error_response
+from agentcat.modules.exceptions import capture_exception
 from agentcat.modules.identify import identify_session
 from agentcat.modules.internal import attach_event_metadata
 from agentcat.modules.logging import write_to_log
@@ -43,7 +44,7 @@ def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
         """Intercept initialize requests to add AgentCat data to the request context."""
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
-        identity = identify_session(server, request, request_context)
+        identity = await identify_session(server, request, request_context)
 
         # Extract clientInfo from InitializeRequest params (MCP protocol provides it here)
         client_name, client_version = None, None
@@ -82,7 +83,7 @@ def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         client_name, client_version = get_client_info_from_request_context(server, request_context)
-        identity = identify_session(server, request, request_context)
+        identity = await identify_session(server, request, request_context)
 
         event = UnredactedEvent(
             session_id=session_id,
@@ -168,7 +169,7 @@ def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         client_name, client_version = get_client_info_from_request_context(server, request_context)
-        identity = identify_session(server, request, request_context)
+        identity = await identify_session(server, request, request_context)
 
         write_to_log(
             f"Intercepted call to tool '{tool_name}' with arguments: {arguments} and request context: {request_context}"
@@ -218,18 +219,27 @@ def override_lowlevel_mcp_server(server: Server, data: AgentCatData) -> None:
             try:
                 # Call the original handler
                 result = await original_call_tool_handler(request)
-                is_error, error_message = is_mcp_error_response(result)
+                # Only the error flag is needed here; capture_exception below
+                # extracts the message itself, so the tuple's message is unused.
+                is_error, _ = is_mcp_error_response(result)
                 event.is_error = is_error
-                event.error = {"message": error_message} if is_error else None
+                # Full structured capture (message/type/platform; the MCP SDK
+                # already converted the exception, so no frames survive here)
+                event.error = (
+                    capture_exception(getattr(result, "root", result))
+                    if is_error
+                    else None
+                )
                 # Record the trace using existing infrastructure
                 event.response = result.model_dump() if result else None
                 event_queue.publish_event(server, event)
                 return result
 
             except Exception as e:
-                # Record the error trace
+                # Record the error trace with full structured capture
+                # (frames, chained errors, platform)
                 event.is_error = True
-                event.error = {"message": str(e)}
+                event.error = capture_exception(e)
                 event_queue.publish_event(server, event)
                 raise
         else:
@@ -256,7 +266,7 @@ def override_lowlevel_mcp_server_minimal(server: Server, data: AgentCatData) -> 
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         try:
-            identity = identify_session(server, request, request_context)
+            identity = await identify_session(server, request, request_context)
         except Exception as e:
             identity = None
             write_to_log(f"Ran into an error in session identification, no identity could be determined: {e}")
@@ -297,7 +307,7 @@ def override_lowlevel_mcp_server_minimal(server: Server, data: AgentCatData) -> 
         session_id = get_server_session_id(server)
         request_context = safe_request_context(server)
         client_name, client_version = get_client_info_from_request_context(server, request_context)
-        identity = identify_session(server, request, request_context)
+        identity = await identify_session(server, request, request_context)
 
         event = UnredactedEvent(
             session_id=session_id,

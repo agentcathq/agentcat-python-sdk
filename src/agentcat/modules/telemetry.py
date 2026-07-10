@@ -63,6 +63,10 @@ class TelemetryManager:
             from .exporters.sentry import SentryExporter
 
             return SentryExporter(config)
+        elif exporter_type == "posthog":
+            from .exporters.posthog import PostHogExporter
+
+            return PostHogExporter(config)
         else:
             write_to_log(f"Unknown exporter type: {exporter_type}")
             return None

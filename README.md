@@ -72,7 +72,7 @@ agentcat.track(server, "proj_0000000")
 
 ### Identifying users
 
-You can identify your user sessions with a simple callback AgentCat exposes, called `identify`.
+You can identify your user sessions with a simple callback AgentCat exposes, called `identify`. The hook runs on every captured request and an `agentcat:identify` event is published each time it returns an identity; `user_id`/`user_name` are overwritten and `user_data` keys merge across calls.
 
 ```python
 from agentcat import AgentCatOptions, UserIdentity

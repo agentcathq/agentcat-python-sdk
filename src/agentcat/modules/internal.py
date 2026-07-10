@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from ..types import EventType, AgentCatData, ToolRegistration, UnredactedEvent
 from .compatibility import is_official_fastmcp_server
-from .logging import write_to_log
+from .logging import safe_error_string, write_to_log
 from .validation import validate_tags
 
 # WeakKeyDictionary to store data associated with server instances
@@ -51,6 +51,10 @@ def reset_all_tracking_data() -> None:
     """Reset all server tracking data (mainly for testing)."""
     _server_data_map.clear()
     _original_methods.clear()
+    # Lazy import to avoid a module-level import cycle (identify → internal).
+    from .identify import reset_identity_cache
+
+    reset_identity_cache()
     write_to_log("Reset all server tracking data")
 
 
@@ -136,14 +140,15 @@ async def resolve_event_tags(
         result = callback(request, extra)
         if inspect.iscoroutine(result):
             result = await result
+        # Truthiness/validation stay inside the guard: the callback may return
+        # arbitrary objects (broken __bool__, non-dict) and this runs on the
+        # customer's request path.
+        if not result:
+            return None
+        return validate_tags(result)
     except Exception as e:
-        write_to_log(f"event_tags callback error: {e}")
+        write_to_log(f"event_tags callback error: {safe_error_string(e)}")
         return None
-
-    if not result:
-        return None
-
-    return validate_tags(result)
 
 
 async def resolve_event_properties(
@@ -162,11 +167,12 @@ async def resolve_event_properties(
         result = callback(request, extra)
         if inspect.iscoroutine(result):
             result = await result
+        # Truthiness stays inside the guard — arbitrary return values may have
+        # a broken __bool__ and this runs on the customer's request path.
+        return result or None
     except Exception as e:
-        write_to_log(f"event_properties callback error: {e}")
+        write_to_log(f"event_properties callback error: {safe_error_string(e)}")
         return None
-
-    return result or None
 
 
 async def attach_event_metadata(
@@ -178,18 +184,22 @@ async def attach_event_metadata(
     """Attach customer-defined tags and properties to an event before publish.
 
     Safe no-op if data is None or callbacks are unset. Failures in either
-    callback are logged and swallowed — event is still published.
+    callback are logged and swallowed — event is still published. Must never
+    raise: call sites run unguarded on the customer's request path.
     """
-    if data is None:
-        return
+    try:
+        if data is None:
+            return
 
-    tags = await resolve_event_tags(data, request, extra)
-    if tags:
-        event.tags = tags
+        tags = await resolve_event_tags(data, request, extra)
+        if tags:
+            event.tags = tags
 
-    properties = await resolve_event_properties(data, request, extra)
-    if properties:
-        event.properties = properties
+        properties = await resolve_event_properties(data, request, extra)
+        if properties:
+            event.properties = properties
+    except Exception as e:
+        write_to_log(f"attach_event_metadata error: {safe_error_string(e)}")
 
 
 def get_tool_timeline(server: Any) -> List[Dict[str, Any]]:
