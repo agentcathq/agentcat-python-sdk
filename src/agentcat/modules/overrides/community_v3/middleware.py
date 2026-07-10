@@ -479,16 +479,21 @@ class AgentCatMiddleware:
             Dictionary representation of the tool.
         """
         try:
-            if hasattr(tool, "model_dump"):
-                return tool.model_dump()
-            elif hasattr(tool, "to_mcp_tool"):
+            # Prefer the canonical MCP shape. A FastMCP Tool.model_dump() includes
+            # SDK-internal fields that are not JSON-serializable — a callable ``fn``
+            # (FunctionTool) and a ``tags`` set — which would break event
+            # serialization; to_mcp_tool() yields the clean wire representation
+            # (name/description/inputSchema/...).
+            if hasattr(tool, "to_mcp_tool"):
                 mcp_tool = tool.to_mcp_tool()
-                return mcp_tool.model_dump() if hasattr(mcp_tool, "model_dump") else {}
-            else:
-                return {
-                    "name": getattr(tool, "name", "unknown"),
-                    "description": getattr(tool, "description", ""),
-                }
+                if hasattr(mcp_tool, "model_dump"):
+                    return mcp_tool.model_dump(mode="json")
+            if hasattr(tool, "model_dump"):
+                return tool.model_dump(mode="json")
+            return {
+                "name": getattr(tool, "name", "unknown"),
+                "description": getattr(tool, "description", ""),
+            }
         except Exception as e:
             write_to_log(f"Error converting tool to dict: {e}")
             return {"name": getattr(tool, "name", "unknown")}

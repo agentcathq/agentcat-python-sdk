@@ -34,12 +34,12 @@ except Exception:  # pragma: no cover - import guard
     HAS_FASTMCP_V3 = False
 
 
-# A Rootly-flavored spec with many distinct operationIds so list_tools returns a
+# An Acme Co-flavored spec with many distinct operationIds so list_tools returns a
 # realistic multi-tool set. Every route is forced to a TOOL below. The ``boom``
 # endpoint is used to exercise the HTTP-error capture path.
 OPENAPI_SPEC: dict[str, Any] = {
     "openapi": "3.0.0",
-    "info": {"title": "rootly", "version": "1"},
+    "info": {"title": "acme", "version": "1"},
     "paths": {
         "/severities": {
             "get": {"operationId": "list_severities", "responses": {"200": {"description": "ok"}}},
@@ -136,7 +136,7 @@ def create_community_openapi_server(record_requests: list | None = None) -> "Fas
     return CommunityFastMCP.from_openapi(
         openapi_spec=OPENAPI_SPEC,
         client=client,
-        name="rootly",
+        name="acme",
         route_maps=[RouteMap(mcp_type=MCPType.TOOL)],
     )
 
