@@ -50,7 +50,7 @@ def _openapi_tool():
     """An OpenAPI-generated tool holding an httpx client (non-deepcopyable)."""
     spec = {
         "openapi": "3.0.0",
-        "info": {"title": "rootly", "version": "1"},
+        "info": {"title": "acme", "version": "1"},
         "paths": {
             "/severities": {
                 "get": {
@@ -62,7 +62,7 @@ def _openapi_tool():
         },
     }
     client = httpx.AsyncClient(base_url="https://example.com")
-    server = FastMCP.from_openapi(openapi_spec=spec, client=client, name="rootly")
+    server = FastMCP.from_openapi(openapi_spec=spec, client=client, name="acme")
     tools = server.list_tools()
     if asyncio.iscoroutine(tools):
         tools = asyncio.run(tools)
