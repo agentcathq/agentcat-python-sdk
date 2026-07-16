@@ -719,6 +719,135 @@ class TestPublishEvent:
         added_event = mock_eq.add.call_args[0][0]
         assert added_event.redaction_fn == mock_redaction_fn
 
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.get_session_info")
+    @patch("agentcat.modules.event_queue.set_last_activity")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_attaches_redact_event_hook_from_options(
+        self, mock_eq, mock_set_activity, mock_session, mock_tracking
+    ):
+        """Test publishing event includes the event-level hook from options."""
+        mock_server = MagicMock()
+        mock_hook = MagicMock()
+        mock_data = AgentCatData(
+            project_id="project-123",
+            session_id="session-123",
+            session_info=SessionInfo(),
+            last_activity=datetime.now(timezone.utc),
+            options=AgentCatOptions(redact_event=mock_hook),
+        )
+        mock_tracking.return_value = mock_data
+        mock_session.return_value = SessionInfo()
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        publish_event(mock_server, event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.redact_event_fn == mock_hook
+
+
+class TestEventLevelRedactionHook:
+    """Test the redact_event hook in the queue pipeline."""
+
+    @staticmethod
+    def _event(**overrides) -> UnredactedEvent:
+        defaults = dict(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            resource_name="add_todo",
+            parameters={"text": "raw sensitive value"},
+            user_intent="raw secret",
+        )
+        defaults.update(overrides)
+        return UnredactedEvent(**defaults)
+
+    def test_hook_result_is_published(self):
+        """The hook sees raw metadata and its rewrite is what gets sent."""
+        seen = {}
+
+        def hook(event):
+            seen["resource_name"] = event.resource_name
+            seen["parameters"] = event.parameters
+            modified = event.model_copy()
+            modified.parameters = {"text": "[EVENT-REDACTED]"}
+            return modified
+
+        eq = EventQueue()
+        event = self._event(redact_event_fn=hook)
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+            assert seen["resource_name"] == "add_todo"
+            assert seen["parameters"] == {"text": "raw sensitive value"}
+            sent_event = mock_send.call_args[0][0]
+            assert sent_event.parameters == {"text": "[EVENT-REDACTED]"}
+            assert sent_event.redact_event_fn is None
+
+    @patch("agentcat.modules.event_queue.write_to_log")
+    def test_hook_returning_none_drops_the_event(self, mock_log):
+        eq = EventQueue()
+        event = self._event(redact_event_fn=lambda event: None)
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+            mock_send.assert_not_called()
+            log_messages = [str(c) for c in mock_log.call_args_list]
+            assert any("dropped by redact_event hook" in m for m in log_messages)
+
+    @patch("agentcat.modules.event_queue.write_to_log")
+    def test_hook_raising_drops_the_event(self, mock_log):
+        def hook(event):
+            raise ValueError("hook exploded")
+
+        eq = EventQueue()
+        event = self._event(redact_event_fn=hook)
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+            mock_send.assert_not_called()
+            log_messages = [str(c) for c in mock_log.call_args_list]
+            assert any(
+                "Failed to redact event (event-level hook)" in m
+                for m in log_messages
+            )
+
+    @patch("agentcat.modules.event_queue.redact_event")
+    def test_hook_runs_before_string_redaction(self, mock_redact):
+        """The event hook sees raw values; string redaction runs on its output."""
+        raw_seen = {}
+
+        def hook(event):
+            raw_seen["user_intent"] = event.user_intent
+            modified = event.model_copy()
+            modified.user_intent = "hook output"
+            return modified
+
+        string_fn = MagicMock()
+        mock_redact.side_effect = lambda event, fn: event
+
+        eq = EventQueue()
+        event = self._event(redact_event_fn=hook, redaction_fn=string_fn)
+
+        with patch.object(eq, "_send_event"):
+            eq._process_event(event)
+
+            assert raw_seen["user_intent"] == "raw secret"
+            mock_redact.assert_called_once()
+            redacted_arg = mock_redact.call_args[0][0]
+            assert redacted_arg.user_intent == "hook output"
+            assert mock_redact.call_args[0][1] is string_fn
+
 
 @patch("agentcat.modules.event_queue.signal.signal")
 @patch("agentcat.modules.event_queue.atexit.register")

@@ -1,12 +1,15 @@
 """Unit tests for the redaction module."""
 
 import pytest
+from datetime import datetime, timezone
 from typing import Any, Dict
 from agentcat.modules.redaction import (
     redact_strings_in_object,
     redact_event,
+    apply_event_redaction,
     PROTECTED_FIELDS,
 )
+from agentcat.types import Event, UnredactedEvent
 
 
 class TestRedactStringsInObject:
@@ -367,3 +370,134 @@ class TestRedactEvent:
         # The function should propagate the error
         with pytest.raises(ValueError, match="Redaction error"):
             redact_event(event, faulty_redact_fn)
+
+
+class TestApplyEventRedaction:
+    """Test suite for the event-level redaction hook helper."""
+
+    @staticmethod
+    def _base_event() -> UnredactedEvent:
+        return UnredactedEvent(
+            id="evt_original",
+            session_id="ses_123",
+            project_id="proj_789",
+            event_type="mcp:tools/call",
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            resource_name="add_todo",
+            parameters={"text": "sensitive text"},
+            response={"content": "sensitive response"},
+            user_intent="sensitive intent",
+        )
+
+    def test_applies_sync_hook_in_place(self):
+        def hook(event: Event) -> Event:
+            modified = event.model_copy()
+            modified.parameters = {"text": "[SCRUBBED]"}
+            return modified
+
+        event = self._base_event()
+        kept = apply_event_redaction(event, hook)
+
+        assert kept is True
+        assert event.parameters == {"text": "[SCRUBBED]"}
+        assert event.response == {"content": "sensitive response"}
+
+    def test_applies_async_hook_in_place(self):
+        async def hook(event: Event) -> Event:
+            modified = event.model_copy()
+            modified.user_intent = "[SCRUBBED]"
+            return modified
+
+        event = self._base_event()
+        kept = apply_event_redaction(event, hook)
+
+        assert kept is True
+        assert event.user_intent == "[SCRUBBED]"
+
+    def test_reports_drop_and_leaves_event_untouched_on_none(self):
+        def hook(event: Event) -> None:
+            return None
+
+        event = self._base_event()
+        kept = apply_event_redaction(event, hook)
+
+        assert kept is False
+        assert event.parameters == {"text": "sensitive text"}
+        assert event.user_intent == "sensitive intent"
+
+    def test_honors_cleared_fields_instead_of_resurrecting_them(self):
+        def hook(event: Event) -> Event:
+            modified = event.model_copy()
+            modified.response = None
+            modified.user_intent = None
+            return modified
+
+        event = self._base_event()
+        kept = apply_event_redaction(event, hook)
+
+        assert kept is True
+        assert event.response is None
+        assert event.user_intent is None
+        assert event.parameters == {"text": "sensitive text"}
+
+    def test_restores_system_managed_fields(self):
+        def hook(event: Event) -> Event:
+            modified = event.model_copy()
+            modified.id = "evt_forged"
+            modified.session_id = "ses_forged"
+            modified.project_id = "proj_forged"
+            # event_type is enum-validated by pydantic, so forge with a
+            # different-but-valid value
+            modified.event_type = "mcp:ping"
+            modified.timestamp = None
+            return modified
+
+        event = self._base_event()
+        apply_event_redaction(event, hook)
+
+        assert event.id == "evt_original"
+        assert event.session_id == "ses_123"
+        assert event.project_id == "proj_789"
+        assert event.event_type == "mcp:tools/call"
+        assert event.timestamp == datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    def test_hides_internal_function_fields_and_preserves_redaction_fn(self):
+        saw_event: dict[str, Any] = {}
+
+        def hook(event: Event) -> Event:
+            saw_event["value"] = event
+            return event
+
+        def string_redact_fn(text: str) -> str:
+            return text
+
+        event = self._base_event()
+        event.redaction_fn = string_redact_fn
+        event.redact_event_fn = hook
+
+        kept = apply_event_redaction(event, hook)
+
+        assert kept is True
+        assert not hasattr(saw_event["value"], "redaction_fn")
+        assert not hasattr(saw_event["value"], "redact_event_fn")
+        # The string-level hook must survive so it still runs afterwards
+        assert event.redaction_fn is string_redact_fn
+
+    def test_propagates_hook_errors_to_the_caller(self):
+        def hook(event: Event) -> Event:
+            raise ValueError("Hook failure")
+
+        with pytest.raises(ValueError, match="Hook failure"):
+            apply_event_redaction(self._base_event(), hook)
+
+    def test_keeps_the_same_object_identity_for_pipeline_observers(self):
+        def hook(event: Event) -> Event:
+            modified = event.model_copy()
+            modified.parameters = {"text": "[SCRUBBED]"}
+            return modified
+
+        event = self._base_event()
+        observer = event  # e.g. a capture holding the reference before processing
+        apply_event_redaction(event, hook)
+
+        assert observer.parameters == {"text": "[SCRUBBED]"}

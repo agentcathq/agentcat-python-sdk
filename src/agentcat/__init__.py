@@ -22,7 +22,9 @@ from .modules.diagnostics import init_diagnostics
 from .modules.internal import set_server_tracking_data
 from .modules.logging import set_debug_mode, write_to_log
 from .types import (
+    Event,
     EventPropertiesFunction,
+    EventRedactionFunction,
     EventTagsFunction,
     IdentifyFunction,
     AgentCatData,
@@ -256,8 +258,10 @@ __all__ = [
     # Types for identify functionality
     "UserIdentity",
     "IdentifyFunction",
-    # Type for redaction functionality
+    # Types for redaction functionality
     "RedactionFunction",
+    "EventRedactionFunction",
+    "Event",
     # Types for event metadata callbacks
     "EventTagsFunction",
     "EventPropertiesFunction",

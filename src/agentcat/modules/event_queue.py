@@ -21,7 +21,7 @@ from ..utils import generate_prefixed_ksuid
 from .compatibility import get_mcp_compatible_error_message
 from .internal import get_server_tracking_data
 from .logging import write_to_log
-from .redaction import redact_event
+from .redaction import apply_event_redaction, redact_event
 from .sanitization import sanitize_event
 from .truncation import truncate_event
 from .session import get_session_info, set_last_activity
@@ -105,6 +105,23 @@ class EventQueue:
 
     def _process_event(self, event: UnredactedEvent) -> None:
         """Process a single event."""
+        if event and event.redact_event_fn:
+            # Run the customer's event-level redaction hook first, on raw values
+            event_redact_fn = event.redact_event_fn
+            event.redact_event_fn = None
+            try:
+                if not apply_event_redaction(event, event_redact_fn):
+                    write_to_log(
+                        f"Event {event.id or 'unknown'} dropped by redact_event hook"
+                    )
+                    return
+            except Exception as error:
+                write_to_log(
+                    f"Failed to redact event (event-level hook), dropping event "
+                    f"{event.id or 'unknown'}: {error}"
+                )
+                return
+
         if event and event.redaction_fn:
             # Redact sensitive information if a redaction function is provided
             try:
@@ -320,6 +337,7 @@ def publish_event(server: Any, event: UnredactedEvent) -> None:
     full_event = UnredactedEvent(
         **merged_data,
         redaction_fn=data.options.redact_sensitive_information,
+        redact_event_fn=data.options.redact_event,
     )
 
     set_last_activity(server)

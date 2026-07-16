@@ -14,6 +14,13 @@ from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 IdentifyFunction = Callable[[dict[str, Any], Any], Optional["UserIdentity"]]
 # Type alias for redaction function
 RedactionFunction = Callable[[str], str | Awaitable[str]]
+# Type alias for the event-level redaction hook — receives the full Event and
+# returns a modified Event, or None to drop the event entirely.
+# Accepts sync or async callables (mirrors RedactionFunction).
+EventRedactionFunction = Callable[
+    ["Event"],
+    Union["Event", None, Awaitable[Union["Event", None]]],
+]
 # Type alias for event_tags callback — returns str:str map attached to every auto-captured event.
 # Accepts sync or async callables (mirrors RedactionFunction).
 EventTagsFunction = Callable[
@@ -117,6 +124,7 @@ class EventType(str, Enum):
 
 class UnredactedEvent(Event):
     redaction_fn: RedactionFunction | None = None
+    redact_event_fn: EventRedactionFunction | None = None  # Whole-event redaction hook
 
 
 @dataclass
@@ -176,6 +184,16 @@ class AgentCatOptions:
     custom_context_description: str = DEFAULT_CONTEXT_DESCRIPTION
     identify: IdentifyFunction | None = None
     redact_sensitive_information: RedactionFunction | None = None
+    # Event-level redaction hook invoked with the full event (inspect
+    # resource_name, event_type, parameters, response, etc.) before it is
+    # published. Return a modified event, or None to drop the event entirely.
+    # May be sync or async. Runs before redact_sensitive_information, so it
+    # sees raw, unredacted values; the string-level hook, sanitization, and
+    # truncation still run on its output. The system-managed fields id,
+    # session_id, project_id, event_type, and timestamp cannot be changed
+    # (id may be None at hook time). If the hook raises, the event is dropped
+    # and the error is logged to ~/agentcat.log.
+    redact_event: EventRedactionFunction | None = None
     exporters: dict[str, ExporterConfig] | None = None
     debug_mode: bool = False
     api_base_url: str | None = None
