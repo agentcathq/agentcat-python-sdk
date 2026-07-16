@@ -1,9 +1,23 @@
 """PII redaction for AgentCat logs."""
 
+import asyncio
+import inspect
 from typing import Any, TYPE_CHECKING, Callable, Set
 
 if TYPE_CHECKING:
-    from agentcat.types import Event, UnredactedEvent
+    from agentcat.types import Event, EventRedactionFunction, UnredactedEvent
+
+
+# System-managed fields restored after the event-level redaction hook runs.
+# These are required for ingestion and session/project attribution, so
+# consumer changes to them are ignored.
+RESTORED_FIELDS = (
+    "id",
+    "session_id",
+    "project_id",
+    "event_type",
+    "timestamp",
+)
 
 
 # Set of field names that should be protected from redaction.
@@ -101,3 +115,48 @@ def redact_event(event: "UnredactedEvent", redact_fn: Callable[[str], str]) -> "
         A new event object with all strings redacted
     """
     return redact_strings_in_object(event, redact_fn, "", False)
+
+
+def apply_event_redaction(
+    event: "UnredactedEvent", event_redact_fn: "EventRedactionFunction"
+) -> bool:
+    """
+    Applies the customer's event-level redaction hook to an event, in place.
+    The hook receives the full event (without internal function fields) and may
+    return a modified event, or None to drop the event entirely.
+
+    The event object is rewritten rather than replaced: the queue pipeline
+    processes the same object across steps, and copying every field ensures
+    values the hook cleared stay cleared. System-managed fields are restored
+    from the original, and the string-level redaction_fn is preserved so it
+    still runs afterwards.
+
+    Args:
+        event: The event to run the hook on; mutated with the hook's result
+        event_redact_fn: The customer's event-level redaction hook
+
+    Returns:
+        True if the event was kept, False if the hook dropped it
+    """
+    from agentcat.types import Event
+
+    # Hide internal carrier fields from the hook
+    hook_input = Event(**{name: getattr(event, name) for name in Event.model_fields})
+
+    result = event_redact_fn(hook_input)
+    if inspect.iscoroutine(result):
+        # The queue worker runs in a plain thread with no event loop
+        result = asyncio.run(result)
+
+    if result is None:
+        return False
+
+    # Copy every field from the result so values the hook cleared stay
+    # cleared, then restore the system-managed fields from the original
+    snapshot = {name: getattr(event, name) for name in RESTORED_FIELDS}
+    for name in Event.model_fields:
+        setattr(event, name, getattr(result, name, None))
+    for name, value in snapshot.items():
+        setattr(event, name, value)
+
+    return True
