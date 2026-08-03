@@ -1,4 +1,4 @@
-"""Factories for FastMCP v3 servers whose tools hold live runtime state.
+"""Factories for community FastMCP (v3/v4) servers whose tools hold live state.
 
 These build the classes of tool that carry non-deepcopyable runtime state and
 therefore broke context injection before PR #38:
@@ -20,13 +20,28 @@ if TYPE_CHECKING:
 
 # Lazy, guarded imports so importing this module never fails the no-FastMCP CI job
 # or the FastMCP v2 compatibility matrix. Callers gate on HAS_FASTMCP_V3.
+#
+# The HTTP client has to be the one the INSTALLED FastMCP builds its OpenAPI
+# provider on — v3 takes an `httpx.AsyncClient`, v4 an `httpx2.AsyncClient` —
+# so the major picks it. Falling back on ImportError instead would be right only
+# for as long as the unwanted package stays absent: `httpx` is a common
+# transitive dependency, and the day it lands beside FastMCP 4 a "try httpx
+# first" guard would hand the v4 provider a client library it does not use, with
+# no error to say so. Both packages expose the same `AsyncClient` /
+# `MockTransport` / `Response` surface this module needs.
 try:
-    import httpx
     import fastmcp
+
+    _FASTMCP_MAJOR = int(fastmcp.__version__.split(".")[0])
+    if _FASTMCP_MAJOR >= 4:
+        import httpx2 as httpx  # type: ignore[no-redef]
+    else:
+        import httpx
+
     from fastmcp import FastMCP as CommunityFastMCP
     from fastmcp.server.providers.openapi import MCPType, RouteMap
 
-    HAS_FASTMCP_V3 = int(fastmcp.__version__.split(".")[0]) >= 3
+    HAS_FASTMCP_V3 = _FASTMCP_MAJOR >= 3
 except Exception:  # pragma: no cover - import guard
     httpx = None  # type: ignore
     CommunityFastMCP = None  # type: ignore

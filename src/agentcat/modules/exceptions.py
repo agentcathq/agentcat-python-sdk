@@ -1,6 +1,5 @@
 """Exception tracking module for AgentCat."""
 
-import contextvars
 import linecache
 import os
 import re
@@ -11,10 +10,6 @@ from typing import Any
 
 from agentcat.types import ChainedErrorData, ErrorData, StackFrame
 from agentcat.modules.constants import MAX_EXCEPTION_CHAIN_DEPTH, MAX_STACK_FRAMES
-
-_captured_error: contextvars.ContextVar[BaseException | None] = contextvars.ContextVar(
-    "_captured_error", default=None
-)
 
 
 def capture_exception(exc: BaseException | Any) -> ErrorData:
@@ -325,6 +320,19 @@ def is_call_tool_result(value: Any) -> bool:
     MCP SDK converts errors to CallToolResult format:
     { content: [{ type: "text", text: "error message" }], isError: true }
 
+    Both spellings of the error flag count: the official SDK renamed it
+    `isError` -> `is_error` in 2.x, and community FastMCP has always used the
+    snake_case one. Missing the rename would not fail loudly — it would record
+    a pydantic repr of the whole result as the error message.
+
+    Snake case is probed FIRST, and the order is load-bearing rather than
+    cosmetic: FastMCP answers a camelCase attribute through a compatibility
+    shim that emits a `FastMCPDeprecationWarning`, so asking for `isError`
+    first warns on every error result any FastMCP server produces. Asking for
+    `is_error` first short-circuits before the shim is ever reached, and an
+    mcp 1.x `CallToolResult` — which has only the camelCase name — still falls
+    through to it.
+
     Args:
         value: Value to check
 
@@ -333,8 +341,7 @@ def is_call_tool_result(value: Any) -> bool:
     """
     return (
         value is not None
-        and hasattr(value, "isError")
-        and hasattr(value, "content")
+        and (hasattr(value, "is_error") or hasattr(value, "isError"))
         and isinstance(getattr(value, "content", None), list)
     )
 
@@ -406,19 +413,10 @@ def stringify_non_exception(value: Any) -> str:
         return str(value)
 
 
-def store_captured_error(exc: BaseException) -> None:
-    """Stores exception in context variable before MCP SDK processing."""
-    _captured_error.set(exc)
-
-
-def get_captured_error() -> BaseException | None:
-    """Retrieves and clears stored exception from context variable."""
-    exc = _captured_error.get()
-    if exc is not None:
-        _captured_error.set(None)
-    return exc
-
-
-def clear_captured_error() -> None:
-    """Clears any stored exception from context variable."""
-    _captured_error.set(None)
+# The inner-tap trio that used to live here — `store_captured_error` /
+# `get_captured_error` / `clear_captured_error` — was retired by Task 13.5 in
+# favour of `modules.adapters._inner_tap`. It stored the exception IN a
+# ContextVar, which cannot see a capture made below a task or thread boundary
+# (a context is copied downward, so the child's `set` never reaches the parent)
+# and has no per-call slot to close. The replacement stores a per-call cell in
+# the ContextVar and writes to the cell instead; see that module's docstring.

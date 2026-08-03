@@ -5,6 +5,10 @@ A test module declares an `AGENTCAT_OPTIONS_FACTORY` (callable returning
 FastMCP todo server for the module, calls `agentcat.track(...)` with those
 options, mounts the server's Streamable-HTTP app, and yields the URL.
 
+`STATELESS_HTTP = True` at module scope serves it from a stateless app
+instead — a different code path, where the transport builds a fresh session
+per REQUEST and nothing survives between calls.
+
 Module-scoped: one boot per test file, not per test.
 """
 
@@ -43,6 +47,9 @@ def official_http_server(request) -> Tuple[str, Any]:
     )
     options = options_factory()
     server = create_todo_server()
+    # Before the app is built: v1 FastMCP reads this off its settings when it
+    # constructs the session manager.
+    server.settings.stateless_http = getattr(request.module, "STATELESS_HTTP", False)
     agentcat.track(server, "test_project", options)
 
     app = server.streamable_http_app()

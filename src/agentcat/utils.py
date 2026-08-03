@@ -6,6 +6,20 @@ from datetime import datetime, timezone
 from .thirdparty.ksuid import Ksuid, KsuidMs
 
 
+def get_agentcat_version() -> str | None:
+    """The installed AgentCat SDK version, or None if it cannot be read.
+
+    Lives here rather than in the package root so the event pipeline and the
+    telemetry exporters can stamp it without importing `agentcat` itself.
+    """
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version("agentcat")
+    except Exception:
+        return None
+
+
 def generate_ksuid(
     use_milliseconds: bool = False, dt: Optional[datetime] = None
 ) -> str:

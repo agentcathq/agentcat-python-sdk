@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentcat import AgentCatOptions, track
-from agentcat.modules.constants import AGENTCAT_SOURCE
+from agentcat.modules.constants import AGENTCAT_SOURCE, AGENTCAT_TAG_SESSION_SOURCE
 from agentcat.modules.event_queue import EventQueue, set_event_queue
 from agentcat.modules.internal import (
     attach_event_metadata,
@@ -15,8 +15,9 @@ from agentcat.modules.internal import (
     resolve_event_tags,
 )
 from agentcat.modules.redaction import redact_event
-from agentcat.types import EventType, AgentCatData, SessionInfo, UnredactedEvent
+from agentcat.types import EventType, AgentCatData, UnredactedEvent
 
+from .test_utils import LEGACY_ONLY
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
 
@@ -24,9 +25,6 @@ from .test_utils.todo_server import create_todo_server
 def _make_data(event_tags=None, event_properties=None) -> AgentCatData:
     return AgentCatData(
         project_id="p",
-        session_id="ses_x",
-        last_activity=None,
-        session_info=SessionInfo(),
         options=AgentCatOptions(
             event_tags=event_tags, event_properties=event_properties
         ),
@@ -175,8 +173,13 @@ class TestRedactionExemption:
         assert result["parameters"]["q"] == "[REDACTED]"
 
 
+@LEGACY_ONLY
 class TestFastMCPIntegration:
-    """End-to-end test against the FastMCP test server."""
+    """End-to-end test against the FastMCP test server.
+
+    The resolver / attach / redaction tests above are era-agnostic and run on
+    both majors; only this class needs the mcp 1.x harness.
+    """
 
     @pytest.fixture(autouse=True)
     def restore_queue(self):
@@ -208,7 +211,11 @@ class TestFastMCPIntegration:
         tool_events = [e for e in captured if e.event_type == EventType.MCP_TOOLS_CALL.value]
         assert tool_events, "no tool call event captured"
         event = tool_events[0]
-        assert event.tags == {"env": "test"}  # bad! dropped by validation
+        # "bad!" dropped by validation; AgentCat's own namespaced tags merge in
+        # last, outside the customer's 50-tag budget.
+        assert event.tags["env"] == "test"
+        assert "bad!" not in event.tags
+        assert event.tags[AGENTCAT_TAG_SESSION_SOURCE] == "minted"
         assert event.properties == {"flag": True, "build": "abc"}
 
     @pytest.mark.asyncio
@@ -230,7 +237,9 @@ class TestFastMCPIntegration:
 
         tool_events = [e for e in captured if e.event_type == EventType.MCP_TOOLS_CALL.value]
         assert tool_events
-        assert tool_events[0].tags is None
+        # Both callbacks blew up: nothing customer-supplied lands, and only the
+        # SDK's own tags remain.
+        assert tool_events[0].tags == {AGENTCAT_TAG_SESSION_SOURCE: "minted"}
         assert tool_events[0].properties is None
 
     @pytest.mark.asyncio
@@ -260,7 +269,9 @@ class TestFastMCPIntegration:
         tool_events = [e for e in captured if e.event_type == EventType.MCP_TOOLS_CALL.value]
         assert tool_events, "no tool call event captured"
         event = tool_events[0]
-        assert event.tags == {"env": "test"}
+        assert event.tags["env"] == "test"
+        assert "bad!" not in event.tags
+        assert event.tags[AGENTCAT_TAG_SESSION_SOURCE] == "minted"
         assert event.properties == {"flag": True, "nested": {"x": 1}}
 
 

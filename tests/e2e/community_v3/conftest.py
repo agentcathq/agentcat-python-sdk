@@ -4,25 +4,31 @@ Boots a community FastMCP v3 server with `mcp.http_app(transport='streamable-htt
 mounted on a random uvicorn port. Tests connect with
 `fastmcp.Client(StreamableHttpTransport(url, headers=...))`.
 
+A test module declares `STATELESS_HTTP = True` at module scope to be served by
+a stateless app instead. That is a different code path, not a configuration
+detail: a stateless server builds a fresh `ServerSession` per REQUEST, so every
+call reaches the last rung of the client-identity ladder — the rung whose
+per-connection filing this exists to hold.
+
 Module-scoped: one boot per test file.
 """
 
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 import agentcat
 from agentcat import AgentCatOptions
-
 from tests.e2e._helpers import find_free_port, wait_for_port
 
 try:
     from fastmcp import FastMCP
 
-    from agentcat.modules.compatibility import is_community_fastmcp_v3
+    from agentcat.modules.detection import ServerFlavor, detect_server
     HAS_FASTMCP_V3 = True
 except ImportError:
     FastMCP = None  # type: ignore
@@ -34,12 +40,14 @@ def _create_v3_todo_server() -> Any:
         raise RuntimeError("fastmcp v3 is not installed; cannot run v3 e2e tests")
     mcp = FastMCP("v3-todo-server")
 
+    # No `context` parameter of their own: the one the tests send is AgentCat's
+    # injected parameter, so the wire path covers injection and stripping.
     @mcp.tool
-    def add_todo(text: str, context: str = "") -> str:
+    def add_todo(text: str) -> str:
         return f'Added todo: "{text}"'
 
     @mcp.tool
-    def list_todos(context: str = "") -> str:
+    def list_todos() -> str:
         return "no todos"
 
     return mcp
@@ -50,12 +58,12 @@ def _default_options_factory() -> AgentCatOptions:
 
 
 @pytest.fixture(scope="module")
-def v3_http_server(request) -> Tuple[str, Any]:
+def v3_http_server(request) -> tuple[str, Any]:
     if not HAS_FASTMCP_V3:
         pytest.skip("fastmcp v3 not installed")
 
     server = _create_v3_todo_server()
-    if not is_community_fastmcp_v3(server):
+    if detect_server(server).flavor is not ServerFlavor.COMMUNITY_V3:
         pytest.skip("installed fastmcp is not v3")
 
     options_factory: Callable[[], AgentCatOptions] = getattr(
@@ -66,7 +74,10 @@ def v3_http_server(request) -> Tuple[str, Any]:
 
     import uvicorn
 
-    app = server.http_app(transport="streamable-http")
+    app = server.http_app(
+        transport="streamable-http",
+        stateless_http=getattr(request.module, "STATELESS_HTTP", False),
+    )
     port = find_free_port()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     uv_server = uvicorn.Server(config)

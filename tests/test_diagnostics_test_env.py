@@ -26,10 +26,11 @@ def test_track_does_not_enable_diagnostics_in_pytest(monkeypatch):
     monkeypatch.delenv("DISABLE_DIAGNOSTICS", raising=False)
 
     with patch("agentcat.modules.diagnostics.requests.post") as mock_post:
-        # track() runs init_diagnostics before validating the server, so even
-        # the error path would latch diagnostics on without the guard.
-        with pytest.raises(TypeError):
-            agentcat.track(object(), "proj_test_env")
+        # track() runs init_diagnostics before inspecting the server, so even
+        # the unrecognized-shape path would latch diagnostics on without the
+        # guard. track() itself never raises: the object comes back untracked.
+        sentinel = object()
+        assert agentcat.track(sentinel, "proj_test_env") is sentinel
 
         assert diagnostics.is_diagnostics_enabled() is False
         diagnostics.flush_diagnostics()

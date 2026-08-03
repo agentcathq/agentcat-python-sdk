@@ -15,6 +15,7 @@ import pytest
 from agentcat import AgentCatOptions, track
 from agentcat.modules.event_queue import EventQueue, set_event_queue
 from agentcat.modules.request_extra import (
+    extra_from_request_context,
     extract_request_extra,
     params_with_extra,
 )
@@ -32,6 +33,21 @@ def _http_request_context(headers: dict, request_id="req-123", session=None, met
         session=session,
         meta=meta,
     )
+
+
+def _capture_into(sink: list):
+    """A publish_event double that records events.
+
+    `EventsApi.publish_event` is called with a KEYWORD argument, so a bare
+    `sink.append` raises `TypeError` — which the queue swallows as a send
+    failure, leaving the sink empty and any "no events published" assertion
+    passing vacuously.
+    """
+
+    def capture(publish_event_request):
+        sink.append(publish_event_request)
+
+    return capture
 
 
 def _stdio_request_context(request_id="req-456"):
@@ -310,14 +326,10 @@ class TestExtraOnPublishedEvents:
             meta={"progressToken": "tok-7"},
         )
 
-        from agentcat.modules.overrides import mcp_server as mcp_server_mod
-        from agentcat.modules.overrides.official import monkey_patch as official_mp
+        from agentcat.modules.adapters import lowlevel_v1
 
         monkeypatch.setattr(
-            mcp_server_mod, "safe_request_context", lambda _server: fake_ctx
-        )
-        monkeypatch.setattr(
-            official_mp, "safe_request_context", lambda _server: fake_ctx
+            lowlevel_v1, "_safe_request_context", lambda _server: fake_ctx
         )
 
         async with create_test_client(server) as client:
@@ -343,15 +355,60 @@ class TestExtraOnPublishedEvents:
         assert extra.get("meta") == {"progressToken": "tok-7"}
 
     @pytest.mark.asyncio
-    async def test_list_tools_event_includes_extra(self, monkeypatch):
-        """tools/list events should also carry parameters.extra when HTTP-shaped."""
+    async def test_transport_session_id_never_becomes_the_task_handle(
+        self, monkeypatch
+    ):
+        """`Event.session_id` carries the AgentCat task handle, not the
+        transport's `mcp-session-id`.
+
+        v1 correlated on the transport session; v2 ignores it entirely
+        (changelog §3.1) and resolves a `ses_` handle per call. The transport
+        id still rides along untouched under `parameters.extra.sessionId`, so
+        customers who need it can still read it.
+        """
         mock_api_client = MagicMock()
         captured_events: list = []
 
-        def capture_event(publish_event_request):
-            captured_events.append(publish_event_request)
+        mock_api_client.publish_event = MagicMock(
+            side_effect=_capture_into(captured_events)
+        )
+        set_event_queue(EventQueue(api_client=mock_api_client))
 
-        mock_api_client.publish_event = MagicMock(side_effect=capture_event)
+        server = create_todo_server()
+        track(server, "test_project", AgentCatOptions(enable_tracing=True))
+
+        fake_ctx = _http_request_context(
+            headers={"mcp-session-id": "transport-sess-xyz"},
+            request_id="req-handle",
+        )
+        from agentcat.modules.adapters import lowlevel_v1
+
+        monkeypatch.setattr(
+            lowlevel_v1, "_safe_request_context", lambda _server: fake_ctx
+        )
+
+        async with create_test_client(server) as client:
+            await client.call_tool("add_todo", {"text": "t", "context": "handles"})
+            time.sleep(1.0)
+
+        tool_events = [e for e in captured_events if e.event_type == "mcp:tools/call"]
+        assert tool_events, "expected a tools/call event"
+        event = tool_events[0]
+        extra = (event.parameters or {}).get("extra") or {}
+        assert extra.get("sessionId") == "transport-sess-xyz"
+        assert event.session_id != "transport-sess-xyz"
+        assert event.session_id.startswith("ses_")
+
+    @pytest.mark.asyncio
+    async def test_tools_list_publishes_no_event(self, monkeypatch):
+        """v2 intercepts tools/list for schema injection only — it publishes
+        nothing, so `extra` has no tools/list event to ride."""
+        mock_api_client = MagicMock()
+        captured_events: list = []
+
+        mock_api_client.publish_event = MagicMock(
+            side_effect=_capture_into(captured_events)
+        )
         set_event_queue(EventQueue(api_client=mock_api_client))
 
         server = create_todo_server()
@@ -361,23 +418,30 @@ class TestExtraOnPublishedEvents:
             headers={"x-list-header": "list-value"},
             request_id="req-list",
         )
-        from agentcat.modules.overrides import mcp_server as mcp_server_mod
+        from agentcat.modules.adapters import lowlevel_v1
 
         monkeypatch.setattr(
-            mcp_server_mod, "safe_request_context", lambda _server: fake_ctx
+            lowlevel_v1, "_safe_request_context", lambda _server: fake_ctx
         )
 
         async with create_test_client(server) as client:
             await client.list_tools()
             time.sleep(1.0)
 
-        list_events = [e for e in captured_events if e.event_type == "mcp:tools/list"]
-        assert list_events, (
-            f"expected a tools/list event, got {[e.event_type for e in captured_events]}"
-        )
-        params = list_events[0].parameters or {}
-        extra = params.get("extra") or {}
-        headers = (extra.get("requestInfo") or {}).get("headers") or {}
-        assert headers.get("x-list-header") == "list-value", (
-            f"expected list_tools event extra to include header, got params={params}"
-        )
+        assert captured_events == []
+
+
+class TestExtraFromRequestContext:
+    """`extra_from_request_context` shapes the adapters' `parameters` merge."""
+
+    def test_wraps_extra_under_its_key(self):
+        ctx = _http_request_context({"x-a": "b"}, request_id="req-1")
+        assert extra_from_request_context(ctx) == {
+            "extra": {
+                "requestInfo": {"headers": {"x-a": "b"}},
+                "requestId": "req-1",
+            }
+        }
+
+    def test_empty_when_nothing_to_report(self):
+        assert extra_from_request_context(None) == {}

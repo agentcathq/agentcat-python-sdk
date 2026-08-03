@@ -19,6 +19,7 @@ from agentcat.modules.exceptions import (
     stringify_non_exception,
 )
 
+from .test_utils import LEGACY_ONLY
 from .test_utils.client import create_test_client
 from .test_utils.todo_server import create_todo_server
 
@@ -426,8 +427,14 @@ class TestEdgeCases:
                 assert "stack" in error_data
 
 
+@LEGACY_ONLY
 class TestExceptionIntegration:
-    """Integration tests for exception capture with real MCP server calls."""
+    """Integration tests for exception capture with real MCP server calls.
+
+    The `capture_exception` unit tests above are era-agnostic and run on both
+    majors; only this class needs the mcp 1.x harness. The 2.x equivalents live
+    in `test_lowlevel_v2_handles.py`.
+    """
 
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
@@ -606,6 +613,18 @@ class TestExceptionIntegration:
         # Note: MCP SDK wraps the error, so the original tool function may not appear
         # but we still verify the in_app detection logic works
 
+    # NOTE (Task 13.5): the two tests below are restored verbatim from
+    # c32cc92^ and pass, but read them for what they are. `is_in_app` is purely
+    # path-based, and official FastMCP wraps a failing tool in a `ToolError`
+    # whose traceback stops at the wrapper — so the only top-level in_app frame
+    # here is AgentCat's own inner-tap seam, in_app ONLY because this is an
+    # editable checkout. They prove the in_app/context_line machinery runs;
+    # they prove nothing about the CUSTOMER's context lines. The
+    # environment-independent assertion for that is, in
+    # `tests/test_inner_tap.py`, TestOfficialV1's
+    # `test_fastmcp_v1_publishes_the_tool_error_and_its_cause` — which asserts
+    # the customer's own frame and context line inside `chained_errors`, where
+    # FastMCP's wrap actually puts them.
     @pytest.mark.asyncio
     async def test_tool_raises_captures_context_lines(self):
         """Test that context lines are captured for in_app frames."""
@@ -640,6 +659,47 @@ class TestExceptionIntegration:
             context = frame["context_line"]
             assert len(context) > 0
             assert context.strip() != ""
+
+    @pytest.mark.asyncio
+    async def test_tool_error_message_survives_the_sdk_wrapping(self):
+        """The error the agent saw is the error the event records.
+
+        v2 intercepts at the protocol boundary, outside the customer's handler,
+        so the SDK has already turned the exception into an isError
+        CallToolResult by the time AgentCat sees a failed call. The inner tap
+        (Task 13.5) recovers the exception object itself, so the event carries
+        the type, the stack and the cause chain again — and the message stays
+        exactly what the agent was told, which is what this asserts.
+        """
+        captured_events = self._create_mock_event_capture()
+
+        server = create_todo_server()
+        options = AgentCatOptions(enable_tracing=True)
+        track(server, "test_project", options)
+
+        async with create_test_client(server) as client:
+            result = await client.call_tool(
+                "tool_that_raises", {"error_type": "value"}
+            )
+            time.sleep(1.0)
+
+        assert result.isError is True
+        tool_events = [
+            e
+            for e in captured_events
+            if e.event_type == "mcp:tools/call"
+            and e.resource_name == "tool_that_raises"
+        ]
+        assert len(tool_events) == 1
+
+        event = tool_events[0]
+        assert event.is_error is True
+        assert event.error is not None
+        assert "Test value error from tool" in event.error["message"]
+        # The error message is exactly what the agent was told, verbatim.
+        assert event.error["message"] in "".join(
+            c.text for c in result.content if hasattr(c, "text")
+        )
 
     @pytest.mark.asyncio
     async def test_mcp_protocol_error(self):

@@ -1,15 +1,13 @@
 """Redaction over real-wire payloads.
 
-KNOWN BUG (xfail-tracked): `agentcat.modules.redaction.redact_event` only
-recurses into `dict` and `list` types, not Pydantic `UnredactedEvent` objects.
-The event_queue worker invokes `redact_event(event, ...)` where `event` is an
-`UnredactedEvent`; the call returns the input unchanged, so customer-supplied
-redact functions never actually run on the live event-publish path.
-
-Tests below are marked xfail so they:
-1. Codify the intended behavior.
-2. Serve as a regression target — when the bug is fixed, they should be
-   un-xfailed (the strict=False xfail still passes if the test starts working).
+These were xfail-tracked for the whole of the v2 branch:
+`agentcat.modules.redaction.redact_event` walked `str` / `list` / `dict` and
+returned anything else untouched, and the publish path hands it a pydantic
+`UnredactedEvent` — so the documented `redact_sensitive_information` hook was
+a no-op on every real event while the README advertised it as a security
+control. `redact_event` now dumps the model, redacts, and copies back, so the
+markers are gone and these tests are the live guard: a regression here fails
+the suite instead of quietly passing as an xpass.
 """
 
 from __future__ import annotations
@@ -32,11 +30,6 @@ def _set_redact(server, fn) -> None:
     data.options.redact_sensitive_information = fn
 
 
-@pytest.mark.xfail(
-    reason="redact_event does not recurse into Pydantic UnredactedEvent; "
-    "redaction never fires on real events. Track as separate fix.",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_redact_function_runs_on_real_event_payload(
     official_http_server, capture_queue
@@ -67,11 +60,6 @@ async def test_redact_function_runs_on_real_event_payload(
         _set_redact(server, None)
 
 
-@pytest.mark.xfail(
-    reason="redact_event does not recurse into Pydantic UnredactedEvent; "
-    "redaction never fires on real events. Track as separate fix.",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_redaction_can_scrub_authorization_header_in_extra(
     official_http_server, capture_queue
@@ -111,12 +99,6 @@ async def test_redaction_can_scrub_authorization_header_in_extra(
         _set_redact(server, None)
 
 
-@pytest.mark.xfail(
-    reason="redact_event does not invoke the user's redact fn on Pydantic "
-    "events, so redact-fn-raise never fires; the 'drop event on raise' path "
-    "is unreachable until the redact_event recursion bug is fixed.",
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_redaction_failure_drops_event(official_http_server, capture_queue):
     url, server = official_http_server

@@ -1,9 +1,11 @@
 """Identify-per-event behavior over real Streamable HTTP.
 
+v2 has no standalone agentcat:identify event: the hook runs per tool call and
+its result is stamped onto that call's event.
+
 Tests mutate the running server's AgentCatData.options.identify to vary the hook
-per scenario. The default options-factory is tracing-only with no identify;
-identify-swapping on the live server matches the pattern used by
-tests/test_stateless.py.
+per scenario. The default options-factory is tracing-only with no identify, so
+the hook is swapped on the live server instead of re-tracking it.
 
 Each test resets the hook in finally so subsequent tests start clean.
 """
@@ -65,9 +67,11 @@ async def test_identify_hook_receives_real_request_extra(
 
 
 @pytest.mark.asyncio
-async def test_agentcat_identify_self_event_published_per_request(
+async def test_actor_rides_the_tool_call_event_not_a_self_event(
     official_http_server, capture_queue
 ):
+    """v2 stamps the actor onto every tools/call event; the standalone
+    agentcat:identify event is gone."""
     url, server = official_http_server
 
     def identify(_req: Any, _extra: Any) -> Optional[UserIdentity]:
@@ -83,14 +87,8 @@ async def test_agentcat_identify_self_event_published_per_request(
                 )
 
         time.sleep(0.5)
-        identify_events = [
-            e for e in capture_queue if e.event_type == "agentcat:identify"
-        ]
-        assert identify_events, (
-            f"expected agentcat:identify event, got "
-            f"{[e.event_type for e in capture_queue]}"
-        )
-        assert identify_events[0].identify_actor_given_id == "bob"
+        assert {e.event_type for e in capture_queue} == {"mcp:tools/call"}
+        assert _last_call(capture_queue).identify_actor_given_id == "bob"
     finally:
         _set_identify(server, None)
 
@@ -134,7 +132,7 @@ async def test_identify_can_change_identity_mid_session(
 
 
 @pytest.mark.asyncio
-async def test_identify_returning_none_yields_no_self_event(
+async def test_identify_returning_none_yields_an_anonymous_event(
     official_http_server, capture_queue
 ):
     url, server = official_http_server
@@ -152,13 +150,9 @@ async def test_identify_returning_none_yields_no_self_event(
                 )
 
         time.sleep(0.5)
-        identify_events = [
-            e for e in capture_queue if e.event_type == "agentcat:identify"
-        ]
-        assert not identify_events, (
-            f"identify returned None; should NOT publish self-event, got "
-            f"{len(identify_events)}"
-        )
+        event = _last_call(capture_queue)
+        assert event.identify_actor_given_id is None
+        assert event.identify_actor_name is None
     finally:
         _set_identify(server, None)
 

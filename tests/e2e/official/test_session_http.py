@@ -1,15 +1,10 @@
-"""Client-info propagation tests over real Streamable HTTP.
+"""Task-handle and client-info propagation over real Streamable HTTP.
 
-NOTE: User-Agent / X-MCP-Client-Name header parsing is *not* tested e2e
-because real MCP clients always populate session.client_params.clientInfo
-during initialize, and that path wins over header parsing in the SDK
-(see src/agentcat/modules/session.py::get_client_info_from_request_context).
-The header-fallback path is covered by unit tests in tests/test_stateless.py
-that mock ctx.session = None to force the fallback. e2e here verifies the
-real-world path: clientInfo from the SDK propagates to events.
-
-Uses stateless mode so each test gets independent client_info extraction
-rather than fixture-level caching.
+Two things ride every tools/call event and both are resolved per request:
+the task handle (minted on the first call, echoed back by the agent on later
+ones) and the client identity. The identity ladder reads the per-request
+`_meta` keys first and falls back to the handshake clientInfo the SDK's own
+ServerSession captured — no header parsing, no caching of our own.
 """
 
 from __future__ import annotations
@@ -20,13 +15,6 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.types import Implementation
-
-from agentcat import AgentCatOptions
-
-
-def AGENTCAT_OPTIONS_FACTORY() -> AgentCatOptions:
-    return AgentCatOptions(enable_tracing=True, stateless=True)
-
 
 pytestmark = pytest.mark.e2e
 
@@ -137,3 +125,71 @@ async def test_clientinfo_in_extra_headers_when_set(
     )
     assert headers.get("x-mcp-client-name") == "HeaderClient"
     assert headers.get("x-mcp-client-version") == "8.8.8"
+
+
+def _call_events(capture_queue):
+    return [e for e in capture_queue if e.event_type == "mcp:tools/call"]
+
+
+def _text(result) -> str:
+    return "".join(c.text for c in result.content if hasattr(c, "text"))
+
+
+@pytest.mark.asyncio
+async def test_minted_session_id_is_echoed_across_http_calls(
+    official_http_server, capture_queue
+):
+    """First call mints and hands the handle back; the agent echoes it on the
+    next call and both events land on the same task."""
+    url, _ = official_http_server
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as client:
+            await client.initialize()
+            first = await client.call_tool(
+                "add_todo", {"text": "one", "context": "first call of the task"}
+            )
+            text = _text(first)
+            assert "[MCP INSTRUCTIONS]: session_id issued." in text
+            minted = text.split("session_id=")[1].split(" ")[0]
+            assert minted.startswith("ses_")
+
+            second = await client.call_tool(
+                "add_todo", {"text": "two", "session_id": minted}
+            )
+            # Already supplied: nothing is minted back a second time.
+            assert "[MCP INSTRUCTIONS]: session_id issued." not in _text(second)
+
+    time.sleep(0.5)
+    events = _call_events(capture_queue)
+    assert len(events) == 2
+    assert [e.session_id for e in events] == [minted, minted]
+    assert [e.tags["agentcat_session_id_source"] for e in events] == [
+        "minted",
+        "supplied",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_separate_connections_get_separate_tasks(
+    official_http_server, capture_queue
+):
+    """Nothing is stored server-side, so two agents that never echo a handle
+    get two different tasks."""
+    url, _ = official_http_server
+
+    async def call_once(text: str) -> str:
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    "add_todo", {"text": text, "context": "independent task"}
+                )
+                return _text(result).split("session_id=")[1].split(" ")[0]
+
+    first = await call_once("a")
+    second = await call_once("b")
+    assert first != second
+
+    time.sleep(0.5)
+    minted = {e.session_id for e in _call_events(capture_queue)}
+    assert {first, second} <= minted

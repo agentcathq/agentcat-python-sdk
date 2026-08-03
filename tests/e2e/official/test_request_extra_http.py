@@ -131,10 +131,11 @@ async def test_meta_dict_present_when_supported(official_http_server, capture_qu
 
 
 @pytest.mark.asyncio
-async def test_list_tools_event_carries_extra(official_http_server, capture_queue):
-    """tools/list events also receive parameters.extra under HTTP transport
-    (initialize events don't reach our handlers; tools/list is the next-best
-    early-handshake event to verify extra propagation on)."""
+async def test_extra_survives_a_listing_in_the_same_session(
+    official_http_server, capture_queue
+):
+    """tools/list publishes no event in v2, so `extra` rides the tools/call
+    that follows it — with the headers of THAT request, not the listing's."""
     url, _ = official_http_server
     async with streamablehttp_client(
         url, headers={"X-List-Header": "list-value"}
@@ -142,14 +143,11 @@ async def test_list_tools_event_carries_extra(official_http_server, capture_queu
         async with ClientSession(read, write) as client:
             await client.initialize()
             await client.list_tools()
+            await client.call_tool("add_todo", {"text": "l", "context": "listing"})
 
     time.sleep(0.5)
-    list_events = [e for e in capture_queue if e.event_type == "mcp:tools/list"]
-    assert list_events
-    headers = (
-        (list_events[0].parameters or {})
-        .get("extra", {})
-        .get("requestInfo", {})
-        .get("headers", {})
+    assert {e.event_type for e in capture_queue} == {"mcp:tools/call"}
+    headers = _extra(_last_call_event(capture_queue)).get("requestInfo", {}).get(
+        "headers", {}
     )
     assert headers.get("x-list-header") == "list-value"

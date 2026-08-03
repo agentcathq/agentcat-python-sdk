@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from agentcat.modules.exporters.otlp import OTLPExporter
 from agentcat.modules.exporters.sentry import SentryExporter
 from agentcat.types import Event
+from agentcat.utils import get_agentcat_version
 
 INSTALLED_VERSION = importlib.metadata.version("agentcat")
 
@@ -66,3 +67,29 @@ class TestSentryAuthHeaderVersion:
         ):
             exporter = SentryExporter({"dsn": self.DSN})
         assert "sentry_client=agentcat/unknown" in exporter.auth_header
+
+
+class TestGetAgentcatVersion:
+    """The single reader of the installed distribution version.
+
+    Every event is stamped with it and both exporters fall back to it, so its
+    two behaviors — the right lookup key, and never raising — are worth pinning
+    directly. (Restores the coverage that lived in tests/test_session.py before
+    the function moved to agentcat.utils.)
+    """
+
+    def test_returns_the_installed_distribution_version(self):
+        assert get_agentcat_version() == INSTALLED_VERSION
+
+    @patch("importlib.metadata.version")
+    def test_looks_the_version_up_under_the_distribution_name(self, mock_version):
+        mock_version.return_value = "1.2.3"
+        assert get_agentcat_version() == "1.2.3"
+        mock_version.assert_called_once_with("agentcat")
+
+    @patch("importlib.metadata.version")
+    def test_returns_none_when_the_distribution_cannot_be_read(self, mock_version):
+        """An un-readable version must never break event publishing: the field
+        is simply omitted."""
+        mock_version.side_effect = importlib.metadata.PackageNotFoundError("agentcat")
+        assert get_agentcat_version() is None

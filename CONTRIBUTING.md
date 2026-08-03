@@ -10,9 +10,9 @@ Thank you for your interest in contributing to AgentCat! We're excited to have y
    git clone https://github.com/YOUR-USERNAME/agentcat-python-sdk.git
    cd agentcat-python-sdk
    ```
-3. **Install dependencies** using uv:
+3. **Install dependencies** using uv (see [Dev environments](#dev-environments) for the legacy variant):
    ```bash
-   uv sync
+   uv sync --extra community
    ```
 4. **Create a branch** for your feature or fix:
    ```bash
@@ -21,21 +21,63 @@ Thank you for your interest in contributing to AgentCat! We're excited to have y
    git checkout -b fix/your-bug-fix
    ```
 
+## Dev Environments
+
+AgentCat v2 supports two generations of the MCP ecosystem: the official `mcp` package 1.x and 2.x, and community `fastmcp` 3.x and 4.x. The two `mcp` majors cannot be installed side by side, so development uses two mutually exclusive uv dependency groups, declared as conflicting in `pyproject.toml`:
+
+- `mcp-modern` — `mcp` 2.x + `fastmcp` 4.x (the default group)
+- `mcp-legacy` — `mcp` 1.x + `fastmcp` 3.x
+
+**Modern environment (default):**
+
+```bash
+uv sync --extra community
+```
+
+**Legacy environment** (turn off the default modern group, turn on legacy):
+
+```bash
+uv sync --extra community --no-group mcp-modern --group mcp-legacy
+```
+
+Note that a bare `uv run` re-syncs to the default (modern) environment, which would silently undo a legacy sync. Once you have synced the generation you want, run against it with `--no-sync`:
+
+```bash
+uv run --no-sync pytest
+```
+
+**Both generations are expected to pass.** `tests/conftest.py` reads the installed `mcp` major at collection time and skips the modules that target the other generation, so the same `pytest` invocation selects the right subset in either environment — there is nothing to pass by hand. At the time of writing that is 576 passed / 26 skipped on modern and 732 passed / 10 skipped on legacy. CI runs both legs in the `test-dependency-groups` job of `mcp-compatibility.yml`, so a change that only works in the generation you developed in will be caught there.
+
 ## Development Process
 
 ### Making Changes
 
 1. **Write your code** following our Python standards
 2. **Add tests** for new features (required for feature additions)
-3. **Run the test suite** to ensure everything passes:
+3. **Run the test suite** to ensure everything passes, in the generation you
+   synced:
    ```bash
-   uv run pytest
+   uv run --no-sync pytest
    ```
+   `--no-sync`: a bare `uv run` re-syncs to the default (modern) groups and
+   silently undoes a legacy sync. Both generations are expected to pass — see
+   [Dev Environments](#dev-environments).
 4. **Check your code** meets our standards:
    ```bash
-   uv run ruff check .    # Run linting checks
-   uv run ruff format .   # Format code
+   uvx ruff check .    # lint the whole repo
+   git diff --name-only main -- '*.py' | xargs -r uvx ruff format --check
    ```
+   `uvx`, not `uv run` — see [Code Quality](#code-quality) for why. And
+   `--check`, scoped to the files you touched: 46 files in this repo are
+   unformatted, so a bare `uvx ruff format .` rewrites all of them and buries
+   your change in an unrelated 46-file diff. Reformatting debt you did not
+   create is welcome as [its own PR](#the-linttype-debt-and-the-ratchet).
+
+   **`xargs -r`, not `$(…)`.** With no path arguments `ruff format` defaults to
+   `.` — so on a branch that has touched no Python (a docs change, or before
+   you have made any), the substitution expands to nothing and the command
+   becomes exactly the whole-repo rewrite this step exists to avoid. `-r` skips
+   the run instead.
 
 ### Commit Conventions
 
@@ -97,29 +139,98 @@ Looking for a place to start? Check out issues labeled [`good first issue`](http
 ## Testing
 
 - New features **should include tests** to ensure reliability
-- Run tests locally with `uv run pytest`
+- Run tests locally with `uv run --no-sync pytest`, in the generation you synced
 - We use [pytest](https://docs.pytest.org/) for our test suite
 - Test files should be placed in the `tests/` directory with `test_*.py` naming convention
 
 ## Code Quality
 
-Before submitting your PR, ensure your code passes all checks:
-
 ```bash
-# Run tests
-uv run pytest
+# Run tests — this IS gated in CI. `--no-sync` keeps the generation you synced.
+uv run --no-sync pytest
 
 # Check code style and linting
-uv run ruff check .
+uvx ruff check .
 
-# Format code
-uv run ruff format .
+# Check formatting (the whole repo; 46 files already fail — see the ratchet)
+uvx ruff format --check .
 
-# Type checking (if applicable)
-uv run mypy src/agentcat --ignore-missing-imports
+# Format only what you changed. `xargs -r`, never `$(…)`: with no path
+# arguments ruff formats `.`, so an empty expansion silently rewrites all 46.
+git diff --name-only main -- '*.py' | xargs -r uvx ruff format
+
+# Type checking
+uvx mypy src/agentcat
 ```
 
-Our CI will run these same checks on your PR.
+**`uvx`, not `uv run`, for the last three.** `ruff` and `mypy` are declared only
+in the `dev` *extra*, and no default sync installs an extra —
+`[tool.uv] default-groups` selects the `dev` dependency *group*, which holds
+`freezegun`, `pytest-asyncio` and `pytest-cov`. So `uv run ruff check .` fails
+with `ruff: command not found` in a normally-synced checkout. `uvx` fetches the
+tool on demand and needs no environment change, which also keeps these commands
+safe to run in either dependency generation.
+
+One consequence worth knowing: `uvx mypy` runs *without* the project's
+dependencies, so a handful of its findings are import-resolution noise rather
+than real type errors. `uvx --with pydantic mypy src/agentcat` removes the
+largest chunk of it. The table below reports the plain `uvx mypy` number, so
+the commands above reproduce it exactly.
+
+Note that a bare `uv run pytest` syncs the environment to the **default**
+groups first, which is the modern generation (`mcp` 2.x + `fastmcp` 4.x). To
+run the legacy generation's suite, sync it explicitly — see
+[Dev Environments](#dev-environments) — and then use `uv run --no-sync`.
+
+**Only the tests are gated.** Neither workflow in `.github/workflows/` mentions
+ruff or mypy at all, so a lint or type finding will not fail your PR today.
+That is what makes the rule below a convention rather than a check.
+
+### The lint/type debt, and the ratchet
+
+Neither tool has ever been clean on this repo, and turning either into a
+blocking gate would fail every PR on pre-existing findings. Measured on
+`feat/explicit-handles-v2` (`uvx ruff check .`, `uvx mypy src/agentcat`, which
+reads the `strict = true` in `pyproject.toml`):
+
+| Check | `main` | this branch |
+| --- | --- | --- |
+| `ruff check .` | 515 | 259 |
+| `ruff format --check .` | 57 files | 46 files |
+| `mypy src/agentcat` | 80 in 23 files | 53 in 15 files |
+
+Reproduce them with the three `uvx` commands under [Code Quality](#code-quality),
+`ruff format --check .` included — that row counts files the formatter *would*
+rewrite, which is why it is the `--check` form and not the rewriting one.
+
+The standing rule is a **ratchet, not a gate: a change may not add findings.**
+Compare rule-by-rule against `main` rather than eyeballing the totals — a patch
+that fixes ten `E501`s and introduces one `B904` has gone backwards even though
+the count fell. Cleaning up debt you did not create is welcome as its own PR,
+where it can be reviewed as such.
+
+Most of what remains is mechanical: `UP006`/`UP045` (pre-PEP-585/604 typing
+spellings), `E501`, `I001` import ordering, and untyped test helpers.
+
+Measure both sides the same way. Roughly 3 of the 53 mypy findings are the
+import-resolution noise described above, so a `uvx mypy` number and a
+`uvx --with pydantic mypy` number are not comparable to each other — mixing
+them invents an improvement, or hides a regression, that is purely an artifact
+of the invocation.
+
+## Release dependencies outside this repo
+
+Some changes here are only half-shipped until another repo moves. Check these
+before cutting a release:
+
+- **`agentcat-go-api/api/openapi.yaml` is missing the `agentcat:custom`
+  `event_type` enum entry.** `publish_custom_event` emits that type, and the
+  backend has accepted it since TS 2.0, but the generated `agentcat-api` client
+  still validates against the older enum. This SDK works around it by
+  overriding the validator (`Event.event_type_validate_enum` in
+  `src/agentcat/types.py`) — **any other consumer of that spec stays broken
+  until the enum entry lands.** Adding it upstream lets the override be
+  deleted.
 
 ## Dependencies
 
@@ -141,7 +252,6 @@ agentcat-python-sdk/
 │       ├── types.py      # Type definitions
 │       └── utils.py      # Utility functions
 ├── tests/         # Test files
-├── examples/      # Example usage
 ├── docs/          # Documentation
 └── dist/          # Built distributions (generated)
 ```

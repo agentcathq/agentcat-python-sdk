@@ -10,6 +10,17 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+# The two generations agentcat 2.x supports, as PEP 440 ranges. `mcp` spans
+# both majors from one dependency (1.x lowlevel/FastMCP and 2.x
+# lowlevel/MCPServer are four adapters behind one `track()`); `fastmcp` starts
+# at 3.0 because agentcat>=2 dropped community FastMCP 2.x outright — a 2.x
+# server is classified, refused and returned untracked on purpose, so there is
+# nothing for a compatibility leg to assert. That is also why the old `2.9.*`
+# carve-out is gone rather than moved: the whole 2.x line is out of range now.
+env:
+  MCP_RANGE: ">=1.2,<3"
+  FASTMCP_RANGE: ">=3.0,<5"
+
 jobs:
   discover-mcp-versions:
     runs-on: ubuntu-latest
@@ -17,35 +28,18 @@ jobs:
       mcp-versions: ${{ steps.get-mcp-versions.outputs.versions }}
 
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
     - name: Get available MCP versions
       id: get-mcp-versions
       run: |
-        # Get all available versions from PyPI
-        versions=$(pip index versions mcp 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | sort -V)
-
-        # Filter to versions >= 1.2.0 and get only latest patch version for each minor
-        declare -A latest_minor
-        for version in $versions; do
-          major=$(echo $version | cut -d. -f1)
-          minor=$(echo $version | cut -d. -f2)
-          patch=$(echo $version | cut -d. -f3)
-
-          # Include if version >= 1.2.0
-          if [ "$major" -gt 1 ] || ([ "$major" -eq 1 ] && [ "$minor" -ge 2 ]); then
-            minor_key="$major.$minor"
-            latest_minor[$minor_key]="$version"
-          fi
-        done
-
-        # Create JSON array from latest versions
-        filtered_versions=()
-        for version in "${latest_minor[@]}"; do
-          filtered_versions+=(\"$version\")
-        done
-
-        json_array="[$(IFS=,; echo "${filtered_versions[*]}")]"
-        echo "Found MCP versions: $json_array"
-        echo "versions=$json_array" >> $GITHUB_OUTPUT
+        python -m pip install --quiet --disable-pip-version-check packaging
+        python .github/scripts/discover_versions.py mcp "$MCP_RANGE" >> "$GITHUB_OUTPUT"
 
   discover-fastmcp-versions:
     runs-on: ubuntu-latest
@@ -53,41 +47,84 @@ jobs:
       fastmcp-versions: ${{ steps.get-fastmcp-versions.outputs.versions }}
 
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
     - name: Get available FastMCP versions
       id: get-fastmcp-versions
       run: |
-        # Get all available versions from PyPI
-        versions=$(pip index versions fastmcp 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | sort -V)
+        python -m pip install --quiet --disable-pip-version-check packaging
+        python .github/scripts/discover_versions.py fastmcp "$FASTMCP_RANGE" >> "$GITHUB_OUTPUT"
 
-        # Filter to versions >= 2.7.0, exclude 2.9.*, and get only latest patch version for each minor
-        declare -A latest_minor
-        for version in $versions; do
-          major=$(echo $version | cut -d. -f1)
-          minor=$(echo $version | cut -d. -f2)
-          patch=$(echo $version | cut -d. -f3)
+  # The shipped dual-generation configuration, exactly as a customer gets it:
+  # no version pinning, just the two mutually exclusive dependency groups from
+  # pyproject. The discovery matrices below sweep what upstream has PUBLISHED;
+  # this job is the one that proves what we RESOLVE TO still works, and it is
+  # the only place the modern generation's full suite runs on a schedule.
+  #
+  # Both legs run the whole suite. `tests/conftest.py` gates collection on the
+  # installed `mcp` major, so each leg selects its own subset — there is no
+  # per-leg test path to keep in sync here.
+  test-dependency-groups:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - generation: legacy
+          group: mcp-legacy
+          excluded: mcp-modern
+        - generation: modern
+          group: mcp-modern
+          excluded: mcp-legacy
 
-          # Skip 2.9.* versions (known compatibility issues)
-          if [ "$major" -eq 2 ] && [ "$minor" -eq 9 ]; then
-            echo "Skipping FastMCP $version (2.9.* versions have known issues)"
-            continue
-          fi
+    steps:
+    - uses: actions/checkout@v4
 
-          # Include if version >= 2.7.0
-          if [ "$major" -gt 2 ] || ([ "$major" -eq 2 ] && [ "$minor" -ge 7 ]); then
-            minor_key="$major.$minor"
-            latest_minor[$minor_key]="$version"
-          fi
-        done
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
 
-        # Create JSON array from latest versions
-        filtered_versions=()
-        for version in "${latest_minor[@]}"; do
-          filtered_versions+=("\"$version\"")
-        done
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
 
-        json_array="[$(IFS=,; echo "${filtered_versions[*]}")]"
-        echo "Found FastMCP versions: $json_array"
-        echo "versions=$json_array" >> $GITHUB_OUTPUT
+    - name: Install the ${{ matrix.generation }} generation
+      run: |
+        uv sync --extra community \
+          --no-group ${{ matrix.excluded }} --group ${{ matrix.group }}
+
+    - name: Show installed versions
+      run: |
+        uv pip show mcp | grep "Version:" || echo "MCP not found"
+        uv pip show fastmcp | grep "Version:" || echo "FastMCP not found"
+
+    - name: Run the full suite (${{ matrix.generation }})
+      run: |
+        set -o pipefail
+        uv run --no-sync pytest -q 2>&1 | tee pytest.log
+
+    - name: Collect failure details
+      if: failure()
+      env:
+        PACKAGE_UNDER_TEST: dependency-group
+        PACKAGE_VERSION: ${{ matrix.group }}
+      run: |
+        python .github/scripts/collect_failure.py pytest.log
+
+    - name: Upload failure artifact
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: compat-failure-group-${{ matrix.group }}
+        path: failure.json
+        retention-days: 7
 
   test-fastmcp-compatibility:
     runs-on: ubuntu-latest
@@ -110,27 +147,50 @@ jobs:
       with:
         python-version: '3.12'
 
-    - name: Update pyproject.toml with FastMCP ${{ matrix.fastmcp-version }}
+    - name: Pin the community extra to FastMCP ${{ matrix.fastmcp-version }}
       run: |
-        # Update the community extras section with the specific FastMCP version
-        sed -i -E 's/"fastmcp[>=]+[^"]+"/\"fastmcp==${{ matrix.fastmcp-version }}\"/' pyproject.toml
+        # Both edits are ADDRESS-SCOPED to one table. Since Task 1 there are
+        # three `fastmcp` pins and three `mcp` pins in this file — the community
+        # extra plus the `mcp-legacy` / `mcp-modern` dependency groups — and an
+        # unscoped `s/"fastmcp[>=]+[^"]+"/.../` rewrites all of them. That
+        # breaks resolution outright: the group pins are what make the two
+        # generations coherent, and `fastmcp-slim` (4.x's runtime package, and
+        # not matched by that pattern) would be left demanding 4.x while
+        # `fastmcp` was pinned to 3.x.
+        #
+        # This job installs no dependency group at all (see the install step),
+        # so the groups are left exactly as committed and only the two tables
+        # that actually drive this resolution are touched.
+        sed -i -E '/^community = \[/,/^\]/ s/"fastmcp[^"]*"/"fastmcp==${{ matrix.fastmcp-version }}"/' pyproject.toml
 
-        # Also update the MCP dependency to be flexible so FastMCP can choose its version
-        # Remove the strict MCP version constraint and use >=1.2.0
-        sed -i -E 's/"mcp[>=]+[^"]+"/\"mcp>=1.2.0\"/' pyproject.toml
+        # Widen the base `mcp` floor so FastMCP picks whichever generation it
+        # needs. The `<3` ceiling stays: outside it we have no adapter.
+        sed -i -E '/^dependencies = \[/,/^\]/ s/"mcp[<>=!~][^"]*"/"mcp>=1.2.0,<3"/' pyproject.toml
 
-        # Show the updated dependencies for verification
-        echo "Updated dependencies:"
-        grep -A 5 "^dependencies = \[" pyproject.toml
+        echo "Updated [project] dependencies:"
+        sed -n '/^dependencies = \[/,/^\]/p' pyproject.toml
         echo ""
-        echo "Updated community extras:"
-        grep -A 2 "^\[project.optional-dependencies\]" pyproject.toml | grep -A 2 "community"
+        echo "Updated community extra:"
+        sed -n '/^community = \[/,/^\]/p' pyproject.toml
+        echo ""
+        echo "Dependency groups (must be UNCHANGED):"
+        sed -n '/^\[dependency-groups\]/,/^\[/p' pyproject.toml
 
     - name: Install dependencies with FastMCP ${{ matrix.fastmcp-version }}
       run: |
-        # Install with both dev and community extras
-        # Let FastMCP determine which MCP version it needs
-        uv sync --extra dev --extra community
+        # `uv pip install`, NOT `uv sync`. `uv sync` locks before it installs,
+        # and locking is universal: it has to satisfy every declared dependency
+        # group even for groups it will not install, so `--no-default-groups`
+        # does not save it. Measured — pinning `fastmcp==3.4.5` and syncing
+        # fails with "agentcat:mcp-modern depends on fastmcp>=4.0.0b1,<5 and
+        # agentcat[community] depends on fastmcp==3.4.5 ... unsatisfiable".
+        #
+        # A pip-style install reads only `[project]` and its extras. PEP 735
+        # groups are opt-in there, so the pin above is the only thing choosing
+        # a FastMCP and FastMCP is the only thing choosing an mcp — which is
+        # exactly this job's premise.
+        uv venv --python 3.12
+        uv pip install -e ".[dev,community]"
 
     - name: Show installed versions
       run: |
@@ -142,7 +202,9 @@ jobs:
       run: |
         echo "Running community FastMCP tests with version ${{ matrix.fastmcp-version }}"
         set -o pipefail
-        uv run pytest -v 2>&1 | tee pytest.log
+        # `--no-sync`: plain `uv run` would re-sync the env from the lockfile
+        # and undo the pinned install above.
+        uv run --no-sync pytest -v 2>&1 | tee pytest.log
 
     - name: Collect failure details
       if: failure()
@@ -183,23 +245,20 @@ jobs:
 
     - name: Install dependencies with MCP ${{ matrix.mcp-version }} (no FastMCP)
       run: |
-        # Create virtual environment
-        uv venv
+        uv venv --python 3.12
 
-        # Install base dependencies first
-        uv pip install pydantic>=2.0.0 requests>=2.31.0 agentcat-api==1.0.0
+        # The project's own declared deps, rather than a hand-copied list that
+        # silently goes stale every time `[project] dependencies` moves. The
+        # `community` extra is deliberately omitted: this job's whole point is
+        # that agentcat works on official mcp alone.
+        uv pip install -e ".[dev]"
 
-        # Install the specific MCP version
+        # Then force the exact generation under test, overriding whatever the
+        # `>=1.2.0,<3` floor resolved to a moment ago.
         uv pip install "mcp==${{ matrix.mcp-version }}"
 
-        # Install dev dependencies for testing
-        uv pip install pytest>=7.0.0 pytest-asyncio>=0.21.0 mypy>=1.0.0 ruff>=0.1.0 freezegun>=1.2.0
-
-        # Explicitly uninstall fastmcp if it somehow got installed
+        # Belt and braces: nothing above should pull fastmcp in.
         uv pip uninstall fastmcp -y 2>/dev/null || true
-
-        # Install the package itself in editable mode
-        uv pip install -e .
 
     - name: Show installed MCP version
       run: |
@@ -218,9 +277,12 @@ jobs:
     - name: Run tests without community FastMCP
       run: |
         echo "Running tests with MCP ${{ matrix.mcp-version }} (no community FastMCP)"
-        # Run all tests except community tests
+        # `conftest.py` gates collection on the installed mcp major, so the
+        # right subset is selected for whichever generation this leg pinned.
+        # `--no-sync` so `uv run` cannot re-resolve from the lockfile and undo
+        # both the pin and the fastmcp-free premise this job just verified.
         set -o pipefail
-        uv run pytest -v 2>&1 | tee pytest.log
+        uv run --no-sync pytest -v 2>&1 | tee pytest.log
 
     - name: Collect failure details
       if: failure()
@@ -240,7 +302,7 @@ jobs:
 
   send-failure-notification:
     runs-on: ubuntu-latest
-    needs: [discover-mcp-versions, discover-fastmcp-versions, test-fastmcp-compatibility, test-without-fastmcp]
+    needs: [discover-mcp-versions, discover-fastmcp-versions, test-dependency-groups, test-fastmcp-compatibility, test-without-fastmcp]
     if: failure()
 
     steps:
@@ -482,7 +544,7 @@ jobs:
 
   report-compatibility:
     runs-on: ubuntu-latest
-    needs: [discover-mcp-versions, discover-fastmcp-versions, test-fastmcp-compatibility, test-without-fastmcp, send-failure-notification]
+    needs: [discover-mcp-versions, discover-fastmcp-versions, test-dependency-groups, test-fastmcp-compatibility, test-without-fastmcp, send-failure-notification]
     if: always()
 
     steps:
@@ -498,30 +560,41 @@ jobs:
         echo ""
         echo "Generated on: $(date)"
         echo ""
+        echo "📋 SHIPPED DEPENDENCY GROUPS (the configuration customers get)"
+        echo "─────────────────────────────────────────"
+        echo "Legs: mcp-legacy (mcp 1.x + fastmcp 3.x), mcp-modern (mcp 2.x + fastmcp 4.x)"
+        echo "Tests run: the full suite on each leg; tests/conftest.py gates"
+        echo "           collection on the installed mcp major, so each leg"
+        echo "           automatically selects its own era's subset."
+        echo ""
         echo "📋 OFFICIAL MCP COMPATIBILITY (without community FastMCP)"
         echo "─────────────────────────────────────────"
+        echo "Range swept: ${MCP_RANGE}"
         echo "MCP versions tested: ${{ needs.discover-mcp-versions.outputs.mcp-versions }}"
-        echo "Tests run: All tests except community FastMCP tests"
+        echo "Tests run: the full suite, minus whatever conftest gates out"
         echo "Python version: 3.12"
         echo ""
         echo "📋 COMMUNITY FASTMCP COMPATIBILITY TESTING"
         echo "─────────────────────────────────────────"
+        echo "Range swept: ${FASTMCP_RANGE} (2.x is unsupported by agentcat>=2)"
         echo "FastMCP versions tested: ${{ needs.discover-fastmcp-versions.outputs.fastmcp-versions }}"
         echo "MCP version: Determined by each FastMCP version's requirements"
-        echo "Tests run: Community FastMCP tests only"
         echo "Python version: 3.12"
         echo ""
-        echo "🧪 TEST COVERAGE"
+        echo "🧪 SERVER SHAPES COVERED"
         echo "─────────────────────────────────────────"
-        echo "✓ Official FastMCP (mcp.server.fastmcp) compatibility"
-        echo "✓ Community FastMCP (fastmcp package) compatibility - optional dependency"
-        echo "✓ Low-level Server compatibility"
-        echo "✓ All implementations tested with is_compatible_server function"
-        echo "✓ Package works without community FastMCP (using only official MCP)"
+        echo "✓ Official mcp 1.x — low-level Server and mcp.server.fastmcp.FastMCP"
+        echo "✓ Official mcp 2.x — low-level server and MCPServer"
+        echo "✓ Community FastMCP 3.x and 4.x (the agentcat[community] extra)"
+        echo "✓ Community FastMCP 2.x — refused and returned untracked, by design"
+        echo "✓ Package works without community FastMCP (official MCP alone)"
         echo ""
         echo "📦 INSTALLATION OPTIONS"
         echo "─────────────────────────────────────────"
-        echo "• pip install agentcat          - Official MCP only (includes mcp.server.fastmcp)"
+        echo "• pip install agentcat            - Official MCP only. Resolves the"
+        echo "                                    newest mcp in >=1.2.0,<3, i.e. 2.x,"
+        echo "                                    which has NO mcp.server.fastmcp;"
+        echo "                                    pin 'mcp<2' if you need that module."
         echo "• pip install agentcat[community] - Adds community FastMCP support"
         echo ""
         echo "📊 RESULTS"

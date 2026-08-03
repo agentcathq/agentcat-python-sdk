@@ -4,6 +4,7 @@ import atexit
 import queue
 import signal
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -17,14 +18,16 @@ from agentcat_api import ApiClient, Configuration, EventsApi
 from agentcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
 
 from ..types import Event, UnredactedEvent
-from ..utils import generate_prefixed_ksuid
-from .compatibility import get_mcp_compatible_error_message
+from ..utils import generate_prefixed_ksuid, get_agentcat_version
 from .internal import get_server_tracking_data
 from .logging import write_to_log
 from .redaction import redact_event
 from .sanitization import sanitize_event
 from .truncation import truncate_event
-from .session import get_session_info, set_last_activity
+
+# Stamped on every event. Same value 1.x reported, resolved once at import
+# instead of rebuilt per event inside a per-server session cache.
+SDK_LANGUAGE = f"Python {sys.version_info.major}.{sys.version_info.minor}"
 
 
 class EventQueue:
@@ -170,7 +173,7 @@ class EventQueue:
                 )
                 return
             write_to_log(
-                f"Failed to send event {event.id}, retrying... [Error: {get_mcp_compatible_error_message(error)}]"
+                f"Failed to send event {event.id}, retrying... [Error: {error}]"
             )
             if retries < self.max_retries:
                 # Exponential backoff: 1s, 2s, 4s
@@ -287,7 +290,16 @@ atexit.register(lambda: event_queue.destroy())
 
 
 def publish_event(server: Any, event: UnredactedEvent) -> None:
-    """Publish an event to the queue."""
+    """Publish an event to the queue.
+
+    Everything about the CALL is already on the event: the call path resolved
+    the actor, the client identity (design §7) and the handle tags per request
+    and stamped them there. This adds only what is per-SERVER or per-INSTALL —
+    project, server identity captured at track time, SDK language, SDK version
+    — and never merges anything over a field the event already carries. v1
+    merged a per-server metadata cache on top of the event, which silently
+    overwrote the ladder's client name/version on any server that kept one.
+    """
     if not event.duration:
         if event.timestamp:
             event.duration = int(
@@ -304,23 +316,18 @@ def publish_event(server: Any, event: UnredactedEvent) -> None:
         )
         return
 
-    session_info = get_session_info(server, data)
-
-    # Create full event with all required fields
-    # Merge event data with session info
-    event_data = event.model_dump(exclude_none=True)
-    session_data = session_info.model_dump(exclude_none=True)
-
-    # Merge data, ensuring project_id from data takes precedence
-    merged_data = {**event_data, **session_data}
-    merged_data["project_id"] = (
-        data.project_id
-    )  # Override with tracking data's project_id
+    stamped = {
+        **event.model_dump(exclude_none=True),
+        "project_id": data.project_id,
+        "sdk_language": SDK_LANGUAGE,
+        "agentcat_version": get_agentcat_version(),
+        "server_name": data.server_name,
+        "server_version": data.server_version,
+    }
 
     full_event = UnredactedEvent(
-        **merged_data,
+        **stamped,
         redaction_fn=data.options.redact_sensitive_information,
     )
 
-    set_last_activity(server)
     event_queue.add(full_event)

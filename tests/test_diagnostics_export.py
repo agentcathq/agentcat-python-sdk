@@ -50,9 +50,14 @@ def test_flush_swallows_post_errors():
     with patch(
         "agentcat.modules.diagnostics.requests.post",
         side_effect=RuntimeError("network down"),
-    ):
+    ) as mock_post:
         # Must not raise.
         diagnostics.flush_diagnostics()
+
+    # ...for the right reason. Without this, a flush that never posted at all
+    # also "swallows the error", and this test would be green on a diagnostics
+    # path that had stopped exporting entirely.
+    mock_post.assert_called()
 
 
 def test_no_post_when_disabled():

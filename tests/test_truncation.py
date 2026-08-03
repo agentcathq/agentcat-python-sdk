@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from .conftest import MCP_MAJOR
+
 from agentcat import AgentCatOptions, track
 from agentcat.modules.event_queue import EventQueue, set_event_queue
 from agentcat.modules.truncation import (
@@ -291,6 +293,10 @@ class TestPipelineIntegration:
         assert "truncate_event" in source
 
 
+@pytest.mark.skipif(
+    MCP_MAJOR >= 2,
+    reason="uses the mcp 1.x in-memory client harness; ported in Task 12",
+)
 class TestTruncationWithTodoServer:
     """Integration tests: oversized tool calls through the real todo server are truncated."""
 

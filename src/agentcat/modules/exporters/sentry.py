@@ -9,7 +9,7 @@ import requests
 from ...types import Event, SentryExporterConfig
 from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
-from ...modules.session import get_agentcat_version
+from ...utils import get_agentcat_version
 from . import Exporter
 from .trace_context import trace_context
 

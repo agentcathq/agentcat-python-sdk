@@ -64,7 +64,7 @@ class TestMultipleServers:
             # Should have get_more_tools
             assert "get_more_tools" in tool_names1
 
-            # Should have context in tool parameters
+            # Should have context in tool parameters — required, as in 1.x.
             add_todo_tool1 = next(t for t in tools1.tools if t.name == "add_todo")
             assert "context" in add_todo_tool1.inputSchema["properties"]
             assert "context" in add_todo_tool1.inputSchema["required"]
@@ -80,6 +80,8 @@ class TestMultipleServers:
             # Should NOT have context in tool parameters
             add_todo_tool2 = next(t for t in tools2.tools if t.name == "add_todo")
             assert "context" not in add_todo_tool2.inputSchema.get("properties", {})
+            # ...but handles are independent of the context parameter.
+            assert "session_id" in add_todo_tool2.inputSchema["properties"]
 
         # Test server3: should have context and get_more_tools but no tracing
         async with create_test_client(server3) as client3:
@@ -89,9 +91,10 @@ class TestMultipleServers:
             # Should have get_more_tools
             assert "get_more_tools" in tool_names3
 
-            # Should have context in tool parameters
+            # Context injection is independent of tracing; handles are not.
             add_todo_tool3 = next(t for t in tools3.tools if t.name == "add_todo")
             assert "context" in add_todo_tool3.inputSchema["properties"]
+            assert "session_id" not in add_todo_tool3.inputSchema["properties"]
 
         # Clear events before testing
         captured_events.clear()
@@ -319,8 +322,8 @@ class TestMultipleServers:
         def identify1(request, server):
             from agentcat.types import UserIdentity
 
-            if hasattr(request, "params") and hasattr(request.params, "arguments"):
-                args = request.params.arguments
+            if hasattr(request, "arguments"):
+                args = request.arguments
                 if "user" in args:
                     return UserIdentity(
                         user_id=f"s1_{args['user']}",
@@ -333,8 +336,8 @@ class TestMultipleServers:
         def identify2(request, server):
             from agentcat.types import UserIdentity
 
-            if hasattr(request, "params") and hasattr(request.params, "arguments"):
-                args = request.params.arguments
+            if hasattr(request, "arguments"):
+                args = request.arguments
                 if "client_id" in args:
                     return UserIdentity(
                         user_id=f"s2_{args['client_id']}",

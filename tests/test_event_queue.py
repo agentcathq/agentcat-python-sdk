@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, call, patch
 
 from agentcat.modules.event_queue import EventQueue, publish_event
 from agentcat.modules.logging import write_to_log
-from agentcat.types import Event, AgentCatData, AgentCatOptions, SessionInfo, UnredactedEvent
+from agentcat.types import Event, AgentCatData, AgentCatOptions, UnredactedEvent
 
 
 class TestEventQueue:
@@ -188,6 +188,37 @@ class TestEventQueue:
             assert called_event.user_intent == "redacted intent"
             assert called_event.redaction_fn is None
             mock_send.assert_called_once()
+
+    def test_process_event_redacts_for_real(self):
+        """The same path with nothing mocked.
+
+        `test_process_event_with_redaction` above patches `redact_event`, so it
+        proves the queue calls it and nothing about what it does — which is how
+        a `redact_event` that returned its pydantic input untouched survived the
+        whole v2 branch with the README advertising it as a security control.
+        """
+        eq = EventQueue()
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            parameters={"arguments": {"token": "hunter2"}},
+            user_intent="spend hunter2",
+            redaction_fn=lambda s: s.replace("hunter2", "[REDACTED]"),
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+        sent = mock_send.call_args[0][0]
+        assert sent.parameters == {"arguments": {"token": "[REDACTED]"}}
+        assert sent.user_intent == "spend [REDACTED]"
+        assert sent.redaction_fn is None
+        # Protected: the handle still identifies the task on the dashboard.
+        assert sent.session_id == "session-123"
 
     @patch("agentcat.modules.event_queue.redact_event")
     @patch("agentcat.modules.event_queue.write_to_log")
@@ -552,54 +583,125 @@ class TestEventQueue:
             assert eq.worker_thread.is_alive()
 
 
+def _tracking_data(**overrides) -> AgentCatData:
+    """Track-time data in its v2 shape: project, options, server identity."""
+    fields = {
+        "project_id": "project-123",
+        "options": AgentCatOptions(),
+        "server_name": "test-server",
+        "server_version": "1.0.0",
+    }
+    fields.update(overrides)
+    return AgentCatData(**fields)
+
+
 class TestPublishEvent:
     """Test publish_event function."""
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_success(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_success(self, mock_eq, mock_tracking):
         """Test publishing event successfully."""
-        # Mock server and data
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(redact_sensitive_information=None),
+        mock_data = _tracking_data(
+            options=AgentCatOptions(redact_sensitive_information=None)
         )
         mock_tracking.return_value = mock_data
-
-        mock_session_info = SessionInfo(
-            server_name="test-server", server_version="1.0.0"
-        )
-        mock_session.return_value = mock_session_info
 
         # Create event
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
         publish_event(mock_server, event)
 
         mock_tracking.assert_called_once_with(mock_server)
-        mock_session.assert_called_once_with(mock_server, mock_data)
-        mock_set_activity.assert_called_once_with(mock_server)
 
-        # Check event was added with merged data
         mock_eq.add.assert_called_once()
         added_event = mock_eq.add.call_args[0][0]
         assert added_event.project_id == mock_data.project_id
-        # Just verify the event has the expected type and required fields
         assert isinstance(added_event, UnredactedEvent)
         assert added_event.event_type == "mcp:tools/call"
-        assert added_event.session_id is not None
+        assert added_event.session_id == "ses_task_handle"
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_stamps_server_and_sdk_metadata(self, mock_eq, mock_tracking):
+        """Server identity comes from the track-time capture on AgentCatData and
+        the SDK identity from package metadata — there is no session cache to
+        read them from anymore, but every event still carries all four."""
+        import importlib.metadata
+
+        mock_tracking.return_value = _tracking_data(
+            server_name="todo-server", server_version="4.2.0"
+        )
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.server_name == "todo-server"
+        assert added_event.server_version == "4.2.0"
+        assert added_event.sdk_language.startswith("Python ")
+        # Compared against the distribution directly, not against the helper the
+        # pipeline calls, so this cannot pass by agreeing with itself.
+        assert added_event.agentcat_version == importlib.metadata.version("agentcat")
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_keeps_the_events_own_client_identity(
+        self, mock_eq, mock_tracking
+    ):
+        """The per-request client identity ladder (design §7) already stamped
+        this event. Publishing must not overwrite it — the v1 pipeline merged a
+        server-wide session cache OVER the event and defeated the ladder on
+        every non-stateless server."""
+        mock_tracking.return_value = _tracking_data()
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+            client_name="Cursor",
+            client_version="2.6.22",
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.client_name == "Cursor"
+        assert added_event.client_version == "2.6.22"
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_keeps_the_events_own_actor_and_tags(
+        self, mock_eq, mock_tracking
+    ):
+        """Same rule for everything else the call path resolved per request:
+        the actor `identify` returned and the tags the handle layer merged."""
+        mock_tracking.return_value = _tracking_data()
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+            identify_actor_given_id="user-123",
+            identify_actor_name="Ada",
+            identify_data={"plan": "pro"},
+            tags={"agentcat_session_id_source": "supplied"},
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.identify_actor_given_id == "user-123"
+        assert added_event.identify_actor_name == "Ada"
+        assert added_event.identify_data == {"plan": "pro"}
+        assert added_event.tags == {"agentcat_session_id_source": "supplied"}
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
     @patch("agentcat.modules.event_queue.write_to_log")
@@ -610,7 +712,7 @@ class TestPublishEvent:
 
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -622,29 +724,17 @@ class TestPublishEvent:
         )
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_calculates_duration(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_calculates_duration(self, mock_eq, mock_tracking):
         """Test publishing event calculates duration if not provided."""
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(),
-        )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
+        mock_tracking.return_value = _tracking_data()
 
         # Create event without duration
         event_timestamp = datetime.now(timezone.utc)
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=event_timestamp,
         )
 
@@ -661,26 +751,16 @@ class TestPublishEvent:
             assert event.duration > 0
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_no_duration_no_timestamp(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_no_duration_no_timestamp(self, mock_eq, mock_tracking):
         """Test publishing event with no duration and no timestamp sets duration to None."""
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(),
-        )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
+        mock_tracking.return_value = _tracking_data()
 
         # Create event without duration or timestamp
-        event = UnredactedEvent(event_type="mcp:tools/call", session_id="session-123")
+        event = UnredactedEvent(
+            event_type="mcp:tools/call", session_id="ses_task_handle"
+        )
 
         publish_event(mock_server, event)
 
@@ -688,28 +768,18 @@ class TestPublishEvent:
         assert event.duration is None
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_with_redaction_function(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_with_redaction_function(self, mock_eq, mock_tracking):
         """Test publishing event includes redaction function from options."""
         mock_server = MagicMock()
         mock_redaction_fn = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(redact_sensitive_information=mock_redaction_fn),
+        mock_tracking.return_value = _tracking_data(
+            options=AgentCatOptions(redact_sensitive_information=mock_redaction_fn)
         )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
 
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
