@@ -37,7 +37,12 @@ from agentcat.modules.adapters._inner_tap import (
     tapped,
 )
 
-from .test_utils import LEGACY_ONLY, MODERN_ONLY
+from .test_utils import (
+    LEGACY_ONLY,
+    MODERN_ONLY,
+    NEEDS_CONCURRENT_DISPATCH,
+    NEEDS_LOWLEVEL_ERROR_SEAM,
+)
 
 try:
     import fastmcp  # noqa: F401
@@ -501,6 +506,7 @@ class TestOfficialV1:
         assert tool_frames[0]["in_app"] is True
         assert "Test value error from tool" in tool_frames[0]["context_line"]
 
+    @NEEDS_LOWLEVEL_ERROR_SEAM
     @pytest.mark.asyncio
     async def test_bare_lowlevel_v1_publishes_the_handlers_own_exception(
         self, events
@@ -550,6 +556,7 @@ class TestOfficialV1:
         assert _call_events(events, "tool_that_raises")
         assert len(tracked.content) > len(untracked.content)
 
+    @NEEDS_CONCURRENT_DISPATCH
     @pytest.mark.asyncio
     async def test_parallel_failures_each_get_their_own_slot(self, events):
         from .test_utils.client import create_test_client
@@ -630,8 +637,15 @@ class TestOfficialV1:
 
         Nothing the agent sees came from a Python exception, so the surfaced
         message is the whole payload — the sub-call's stack must not be it.
+
+        The error result is produced by a layer BELOW AgentCat rather than by
+        returning a `CallToolResult` from the tool body, which mcp only honors
+        from 1.19 (PR #1459) and which JSON-serializes into an `isError=False`
+        text block below it. Wrapping `request_handlers` before `track()` puts
+        AgentCat above the layer that answers, which is the arrangement this
+        test is about, and it behaves identically on every mcp 1.x.
         """
-        from mcp.types import CallToolResult, TextContent
+        from mcp.types import CallToolRequest, ServerResult, TextContent
 
         from .test_utils.client import create_test_client
         from .test_utils.todo_server import create_todo_server
@@ -644,14 +658,32 @@ class TestOfficialV1:
             raise Boom(f"INNER {marker}")
 
         @server.tool()
-        async def outer(marker: str) -> CallToolResult:
-            """Handles inner's failure and reports its own error result."""
+        async def outer(marker: str) -> str:
+            """Handles inner's failure and reports its own message."""
             with contextlib.suppress(Exception):
                 await server._tool_manager.call_tool("inner", {"marker": marker})
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"OUTER declined {marker}")],
-                isError=True,
+            return f"OUTER declined {marker}"
+
+        low = server._mcp_server
+        answered = low.request_handlers[CallToolRequest]
+
+        async def declines(req):
+            result = await answered(req)
+            return ServerResult(
+                result.root.model_copy(
+                    update={
+                        "isError": True,
+                        "content": [
+                            TextContent(
+                                type="text",
+                                text=f"OUTER declined {req.params.arguments['marker']}",
+                            )
+                        ],
+                    }
+                )
             )
+
+        low.request_handlers[CallToolRequest] = declines
 
         track(server, "test_project", AgentCatOptions())
 
@@ -666,11 +698,17 @@ class TestOfficialV1:
             "platform": "python",
         }
 
+    @NEEDS_LOWLEVEL_ERROR_SEAM
     @pytest.mark.asyncio
     async def test_a_schema_validation_failure_keeps_the_surfaced_message(
         self, events
     ):
-        """The lowlevel SDK composes that message itself; the probe skips it."""
+        """The lowlevel SDK composes that message itself; the probe skips it.
+
+        Gated on the same seam: the input validation this asserts arrived in
+        the very PR that added `_make_error_result`, so below it there is no
+        "Input validation error:" for AgentCat to keep.
+        """
         from .test_utils.client import create_test_client
 
         server = _bare_v1_server("validating-v1")
@@ -997,10 +1035,11 @@ class _SwallowingMiddleware:
         try:
             return await call_next(context)
         except Exception as exc:
-            from fastmcp.tools import ToolResult
             from mcp.types import TextContent
 
-            return ToolResult(
+            from .test_utils import error_tool_result
+
+            return error_tool_result(
                 content=[TextContent(type="text", text=f"swallowed: {exc}")],
                 is_error=True,
             )
@@ -1102,16 +1141,24 @@ class TestCommunity:
 
     @pytest.mark.asyncio
     async def test_a_proxied_upstream_error_keeps_the_surfaced_message(self, events):
-        """The documented permanent gap, driven through a real proxy.
+        """The documented gap, driven through a real proxy.
 
-        `providers/proxy.py` passes an upstream error result through
-        deliberately — "rather than collapsing it into a raised ToolError" —
-        from a `call_tool_mcp` that never raises. The failure happened in the
-        backend; there is no Python exception anywhere in this process to
-        recover, and no tap placement could change that. Built as an actual
-        proxy so this fails loudly if a future FastMCP starts raising instead.
+        From fastmcp 3.4 `providers/proxy.py` passes an upstream error result
+        through deliberately — "rather than collapsing it into a raised
+        ToolError" — from a `call_tool_mcp` that never raises. The failure
+        happened in the backend; there is no Python exception anywhere in this
+        process to recover, and no tap placement could change that.
+
+        Below 3.4 the proxy did exactly the collapsing that comment rules out
+        (`if result.isError: raise ToolError(first.text)`), so there IS a local
+        exception and the tap keeps it — the gap is a CONSEQUENCE of PR #4217
+        making the pass-through expressible, not a property of proxying. Both
+        branches are asserted rather than one being skipped, so this still
+        fails loudly if a future FastMCP changes its mind again.
         """
         from fastmcp import Client
+
+        from .test_utils import FASTMCP_TOOLRESULT_HAS_IS_ERROR
 
         backend = _community_server("proxy-backend")
         front = _create_proxy(backend)
@@ -1128,7 +1175,12 @@ class TestCommunity:
         upstream = result.content[0].text
         assert "kaboom one" in upstream
         error = _one(events, "boom").error
-        assert error == {"message": upstream, "type": None, "platform": "python"}
+        assert error["message"] == upstream
+        if FASTMCP_TOOLRESULT_HAS_IS_ERROR:
+            assert error == {"message": upstream, "type": None, "platform": "python"}
+        else:
+            assert error["type"] == "ToolError"
+            assert error["frames"]
 
     @pytest.mark.asyncio
     async def test_the_wire_error_is_what_an_untracked_server_returns(self, events):
@@ -1242,8 +1294,9 @@ class TestCommunity:
         frames, to the three-key payload a server with no tap at all produces.
         """
         from fastmcp import Client, FastMCP
-        from fastmcp.tools import ToolResult
         from mcp.types import TextContent
+
+        from .test_utils import error_tool_result
 
         sub_call_is_inside = asyncio.Event()
         let_the_sub_call_finish = asyncio.Event()
@@ -1261,7 +1314,7 @@ class TestCommunity:
                 except Exception as exc:
                     let_the_sub_call_finish.set()
                     await spawned[0]
-                    return ToolResult(
+                    return error_tool_result(
                         content=[TextContent(type="text", text=f"swallowed: {exc}")],
                         is_error=True,
                     )

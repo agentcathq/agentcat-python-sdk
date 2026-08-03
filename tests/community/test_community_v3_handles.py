@@ -658,12 +658,13 @@ async def test_a_tool_returning_is_error_records_the_surfaced_message(capture):
     to tap, so the payload is the SDK-wide no-tap shape built from the wire
     result — not a pydantic repr of FastMCP's ToolResult."""
     from fastmcp.server.middleware import Middleware
-    from fastmcp.tools import ToolResult
     from mcp.types import TextContent
+
+    from ..test_utils import error_tool_result
 
     class Failing(Middleware):
         async def on_call_tool(self, context, call_next):
-            return ToolResult(
+            return error_tool_result(
                 content=[TextContent(type="text", text="the tool said no")],
                 is_error=True,
             )

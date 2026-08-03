@@ -17,6 +17,20 @@ on:
 # server is classified, refused and returned untracked on purpose, so there is
 # nothing for a compatibility leg to assert. That is also why the old `2.9.*`
 # carve-out is gone rather than moved: the whole 2.x line is out of range now.
+#
+# These ranges only started meaning anything when the test steps below gained
+# `uv run --no-sync`. Without it `uv run` re-resolves from the lockfile
+# immediately before pytest, silently discarding the `uv pip install
+# "mcp==X"` pin the step above just made — so every leg ran the lockfile's mcp
+# and the matrix was green by construction. Never drop `--no-sync`; the
+# "Show installed versions" steps are what prove the pin survived.
+#
+# Three capabilities are genuinely absent on the oldest legs rather than
+# spelled differently, and the suite gates on each rather than pretending:
+# concurrent message handling (mcp 1.3), Streamable HTTP plus the request
+# object `extra.requestInfo` reads (1.8 / 1.9.2, see `tests/conftest.py`), and
+# `Server._make_error_result` — the seam the inner tap hooks — with structured
+# tool output (1.10). AgentCat runs below all of them; it just records less.
 env:
   MCP_RANGE: ">=1.2,<3"
   FASTMCP_RANGE: ">=3.0,<5"
@@ -588,6 +602,18 @@ jobs:
         echo "✓ Community FastMCP 3.x and 4.x (the agentcat[community] extra)"
         echo "✓ Community FastMCP 2.x — refused and returned untracked, by design"
         echo "✓ Package works without community FastMCP (official MCP alone)"
+        echo ""
+        echo "📉 WHAT DEGRADES ON THE OLDEST LEGS (AgentCat still runs)"
+        echo "─────────────────────────────────────────"
+        echo "mcp < 1.10  no Server._make_error_result, so a bare lowlevel"
+        echo "            handler's exception type/frames cannot be recovered;"
+        echo "            the surfaced message is still published. No declared"
+        echo "            structured tool output, so no structured mint-back."
+        echo "mcp < 1.9.2 no RequestContext.request: no header/requestInfo capture."
+        echo "mcp < 1.8   no Streamable HTTP transport at all."
+        echo "mcp < 1.3   messages are handled serially, so nothing overlaps."
+        echo "fastmcp<3.4 no ToolResult.is_error: a proxied upstream error"
+        echo "            arrives as a raised ToolError instead of a result."
         echo ""
         echo "📦 INSTALLATION OPTIONS"
         echo "─────────────────────────────────────────"

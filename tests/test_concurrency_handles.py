@@ -31,8 +31,12 @@ from agentcat.modules.constants import (
     SESSION_ID_PARAM,
 )
 
-from .test_utils import sid
+from .test_utils import NEEDS_CONCURRENT_DISPATCH, sid
 from .test_utils.flavors import flavors
+
+# Every test here asserts `barrier.peak == TOTAL`, which is unsatisfiable on an
+# SDK that handles messages serially. See `NEEDS_CONCURRENT_DISPATCH`.
+pytestmark = NEEDS_CONCURRENT_DISPATCH
 
 TOTAL = 25
 

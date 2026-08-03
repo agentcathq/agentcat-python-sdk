@@ -169,7 +169,6 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         ServerResult,
         TextContent,
         Tool,
-        ToolAnnotations,
     )
 
     from agentcat.modules.callpath import (
@@ -217,13 +216,24 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         return state.get(f"orig_{key}")
 
     def make_get_more_tools() -> Tool:
+        # Spec defaults assume the worst; declare the honest hint so
+        # annotation-aware clients skip the confirmation prompt. Passed as a
+        # plain mapping, not the `ToolAnnotations` model — that model only
+        # exists from mcp 1.7, and importing it unconditionally used to make
+        # `install_lowlevel_v1` raise on 1.2-1.6, where `track()`'s blanket
+        # except turned AgentCat into a silent no-op. `Tool` is extra="allow"
+        # on every 1.x, so the mapping is absorbed below 1.7 and coerced into
+        # the model at and above it.
+        #
+        # Typed `Any` for the same reason `adapters/community.py` does it: the
+        # field is declared `ToolAnnotations | None`, so a type-check pass
+        # rejects the mapping that pydantic accepts at runtime.
+        annotations: Any = {"readOnlyHint": True}
         return Tool(
             name=GET_MORE_TOOLS_NAME,
             description=GET_MORE_TOOLS_DESCRIPTION,
             inputSchema=copy.deepcopy(GET_MORE_TOOLS_SCHEMA),
-            # Spec defaults assume the worst; declare the honest hint so
-            # annotation-aware clients skip the confirmation prompt.
-            annotations=ToolAnnotations(readOnlyHint=True),
+            annotations=annotations,
         )
 
     def advertised_tools(original: Any, options: Any) -> list[Any]:

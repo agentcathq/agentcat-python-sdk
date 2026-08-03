@@ -25,16 +25,26 @@ import pytest
 from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import MCP_INSTRUCTIONS_KEY, SESSION_ID_PARAM
 
-from .test_utils import sid
+from .test_utils import FASTMCP_TOOLRESULT_HAS_IS_ERROR, sid
 from .test_utils.flavors import flavors
 
 # (error key, structured key) as each flavor's own result model spells them.
+# A `None` error key means this era's result model has no error field at all,
+# so the payload correctly carries neither spelling — which is still exactly
+# what this module pins: the event keeps the era's OWN field names.
 EXPECTED_SPELLING = {
     "official-fastmcp-v1": ("isError", "structuredContent"),
     "lowlevel-v1": ("isError", "structuredContent"),
     "mcpserver-v2": ("is_error", "structured_content"),
     "lowlevel-v2": ("is_error", "structured_content"),
-    "community-v3": ("is_error", "structured_content"),
+    # Community FastMCP only grew `ToolResult.is_error` in 3.4 (PR #4217); on
+    # the 3.0-3.3 line the model has three fields and the dump has no error
+    # key. The EVENT's own `is_error` is unaffected — the adapter sets it, it
+    # is not read back off this payload.
+    "community-v3": (
+        "is_error" if FASTMCP_TOOLRESULT_HAS_IS_ERROR else None,
+        "structured_content",
+    ),
     "community-v4": ("is_error", "structured_content"),
 }
 
@@ -67,8 +77,11 @@ async def test_the_event_response_keeps_its_eras_own_field_names(flavor, capture
     response = capture[0].response
     assert isinstance(response, dict)
     # This era's spelling is present, and the other era's is nowhere in it.
-    assert error_key in response
+    if error_key is not None:
+        assert error_key in response
     assert structured_key in response
+    # With `error_key` None this asserts NEITHER error spelling appears, which
+    # is strictly stronger than the case where one is expected.
     assert not (BOTH_SPELLINGS - {error_key, structured_key}) & set(response)
     # ...and it is the customer's own result, undecorated: the mint-back is
     # wire-only and must never reach the analytics payload.

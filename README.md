@@ -45,7 +45,7 @@ pip install --pre "agentcat[community]"
 ```
 
 `--pre` is required while 2.x is a prerelease: without it pip skips
-`2.0.0b1` and resolves the 1.x line instead, which has none of the features
+`2.0.0b2` and resolves the 1.x line instead, which has none of the features
 documented below. Drop the flag once a stable 2.0.0 ships.
 
 One `track()` call covers every supported server shape:
@@ -56,6 +56,21 @@ One `track()` call covers every supported server shape:
 | Official MCP SDK (`mcp`) 2.x — low-level server and `MCPServer` | ✅ |
 | Community FastMCP (`fastmcp`) 3.x and 4.x | ✅ (`agentcat[community]`) |
 | Community FastMCP (`fastmcp`) 2.x | ❌ pin `agentcat<2` |
+
+The floors are `mcp>=1.2.0,<3` and `fastmcp>=3.0.0,<5`, and every minor in
+both ranges is exercised on each change by the compatibility matrix.
+
+AgentCat runs on the whole range, but the oldest MCP releases lack the SDK
+seams some features are built on, so those features go quiet rather than
+break:
+
+| On | What is missing upstream | Effect |
+| --- | --- | --- |
+| `mcp<1.10` | `Server._make_error_result`; declared structured tool output | A bare low-level handler's exception type and stack frames cannot be recovered — the surfaced message is still published. No structured mint-back. |
+| `mcp<1.9.2` | `RequestContext.request` | No header or `requestInfo` capture. |
+| `mcp<1.8` | Streamable HTTP | stdio only. |
+| `mcp<1.3` | Concurrent message handling | The server never has two calls in flight. |
+| `fastmcp<3.4` | `ToolResult.is_error` | A proxied upstream error arrives as a raised `ToolError`, so it is published *with* full exception detail rather than as a bare message. |
 
 To learn more about us, check us out [here](https://agentcat.com)
 
@@ -258,7 +273,7 @@ Learn more about our free and open source [telemetry integrations](https://docs.
 
 ### Known limitations
 
-Two behaviors are worth knowing before you read your first dashboard. Both are deliberate for `2.0.0b1`.
+Two behaviors are worth knowing before you read your first dashboard. Both are deliberate for `2.0.0b2`.
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** When a tool call runs several round trips and the *first* round is what mints the handle, each round is attributed to its own session rather than one shared session. Supplying a `session_id` yourself, or deriving one with `resolve_session_id`, correlates the rounds correctly — those two modes are protocol-enforced. Only the mint-on-first-round case is affected.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and that upstream returns an error result, there is no local Python exception to read, so the event records the error message without a stack trace. Errors raised by your own tool code are unaffected and carry full detail.

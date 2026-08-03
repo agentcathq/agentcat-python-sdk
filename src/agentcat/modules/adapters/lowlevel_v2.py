@@ -127,7 +127,7 @@ def _text_block(text: str) -> Any:
 
 
 def _make_get_more_tools() -> Any:
-    from mcp.types import Tool, ToolAnnotations
+    from mcp.types import Tool
 
     # Built from a keyword mapping rather than literal kwargs. `input_schema`
     # and `read_only_hint` are the 2.x field names, and a type-check pass run
@@ -141,8 +141,11 @@ def _make_get_more_tools() -> Any:
         "description": GET_MORE_TOOLS_DESCRIPTION,
         "input_schema": copy.deepcopy(GET_MORE_TOOLS_SCHEMA),
         # Spec defaults assume the worst; declare the honest hint so
-        # annotation-aware clients skip the confirmation prompt.
-        "annotations": ToolAnnotations(**annotations),
+        # annotation-aware clients skip the confirmation prompt. Handed over as
+        # the mapping itself: pydantic coerces it into whichever annotations
+        # model the running SDK declares, and nothing here has to import a type
+        # whose availability moved between generations.
+        "annotations": annotations,
     }
     return Tool(**fields)
 

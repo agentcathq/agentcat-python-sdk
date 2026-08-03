@@ -6,6 +6,11 @@ mint-back, and the protocol error a malformed request must keep. v2 publishes
 exactly one event type: `mcp:tools/call`. `initialize` only feeds the
 client-identity ladder and `tools/list` is intercepted for schema injection, so
 neither produces an event.
+
+Every `fastmcp` / `httpx2` import is inside a test body, as in the rest of this
+tree. `tests/conftest.py` keeps the community trees out of a run with no
+fastmcp installed, but a module-scope import here would fail at COLLECTION,
+which no conftest gate downstream of it can rescue.
 """
 
 from __future__ import annotations
@@ -13,10 +18,7 @@ from __future__ import annotations
 import json
 import time
 
-import httpx2
 import pytest
-from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
 
 from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
@@ -40,6 +42,9 @@ def _text(result) -> str:
 async def test_handshake_and_list_publish_nothing(v4_http_server, capture_queue):
     """A real handshake plus list_tools produces no events at all — and the
     injected schema survives the SDK's outbound validation."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
     url, _ = v4_http_server
     async with Client(StreamableHttpTransport(url)) as client:
         listed = await client.list_tools()
@@ -54,6 +59,9 @@ async def test_handshake_and_list_publish_nothing(v4_http_server, capture_queue)
 async def test_task_handle_is_minted_then_echoed(v4_http_server, capture_queue):
     """The mint-back travels over the wire — text and structured — and the
     echoed handle keys the next event to the same task."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
     url, _ = v4_http_server
     async with Client(StreamableHttpTransport(url)) as client:
         first = await client.call_tool(
@@ -86,6 +94,9 @@ async def test_task_handle_is_minted_then_echoed(v4_http_server, capture_queue):
 async def test_client_identity_reaches_the_event(v4_http_server, capture_queue):
     """The handshake clientInfo is the last rung of the identity ladder, and it
     reaches the tools/call event over a real connection."""
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
     url, _ = v4_http_server
     async with Client(StreamableHttpTransport(url)) as client:
         await client.call_tool("add_todo", {"text": "who", "context": "x"})
@@ -106,6 +117,8 @@ async def test_a_malformed_tools_call_keeps_its_own_protocol_error(
     customer server's own `-32602` on the wire, and no real client can be made
     to send this, so only a hand-built request reaches it.
     """
+    import httpx2
+
     url, _ = v4_http_server
     headers = {
         "Content-Type": "application/json",

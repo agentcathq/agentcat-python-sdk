@@ -29,7 +29,7 @@ from agentcat.modules.constants import (
 )
 from agentcat.modules.handles import derive_session_id
 
-from .test_utils import sid
+from .test_utils import NEEDS_STRUCTURED_OUTPUT, read_only_hint, sid
 from .test_utils.client import create_test_client
 from .test_utils.delivery import delivered_arguments_for, record_delivered_arguments
 from .test_utils.todo_server import create_todo_server
@@ -115,6 +115,7 @@ async def test_prompted_mode_end_to_end(capture):
     assert call_events[0].user_intent.startswith("Adding a todo item")
 
 
+@NEEDS_STRUCTURED_OUTPUT
 async def test_structured_mint_back_mirrors_into_structured_content(capture):
     """A tool with an outputSchema gets `_mcp_instructions` mirrored in, and its
     schema declares the field so schema-validating clients still accept it."""
@@ -181,7 +182,7 @@ async def test_get_more_tools_keeps_its_own_context_and_publishes(capture):
         # described by the tool's own copy — and handles ride alongside.
         assert gmt.inputSchema["required"] == ["context"]
         assert "session_id" in gmt.inputSchema["properties"]
-        assert gmt.annotations.readOnlyHint is True
+        assert read_only_hint(gmt) is True
 
         result = await client.call_tool(
             "get_more_tools", {"context": "I need a tool to send emails"}
@@ -237,7 +238,13 @@ async def test_hook_mode(capture):
         r2 = await client.call_tool("add_todo", {"text": "hook two"})
         assert "[MCP INSTRUCTIONS]" not in _text(r1)
         assert "[MCP INSTRUCTIONS]" not in _text(r2)
-        assert MCP_INSTRUCTIONS_KEY not in (r1.structuredContent or {})
+        # `getattr`, not attribute access: `structuredContent` is a real field
+        # from mcp 1.10 and an unset extra before it, and pydantic raises
+        # AttributeError for an extra that was never assigned. The claim here
+        # is absence either way.
+        assert MCP_INSTRUCTIONS_KEY not in (
+            getattr(r1, "structuredContent", None) or {}
+        )
 
     call_events = _call_events(capture)
     expected = derive_session_id("cust-1", "proj_test")
@@ -575,9 +582,23 @@ async def test_re_arm_is_not_stacked_by_a_second_track(capture):
 
 async def test_intermediate_mrtr_round_is_tagged_but_never_decorated(capture):
     """A round that asks the client for more input is not the completing round,
-    so it carries no mint-back — text or structured."""
+    so it carries no mint-back — text or structured.
+
+    The round is registered straight into `request_handlers` rather than
+    through `@server.call_tool()`: returning a `CallToolResult` from the
+    decorated function is only honored from mcp 1.19 (PR #1459), and below it
+    the SDK wraps the model itself as content and fails its own validation.
+    `request_handlers` takes a `ServerResult` on every 1.x, and `resultType`
+    rides along as an extra field because `CallToolResult` is extra="allow".
+    """
     from mcp.server.lowlevel import Server
-    from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult, Tool
+    from mcp.types import (
+        CallToolRequest,
+        CallToolRequestParams,
+        CallToolResult,
+        ServerResult,
+        Tool,
+    )
 
     server = Server("mrtr-server")
 
@@ -591,12 +612,15 @@ async def test_intermediate_mrtr_round_is_tagged_but_never_decorated(capture):
             )
         ]
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
-        return CallToolResult(
-            content=[TextContent(type="text", text="need more")],
-            resultType="input_required",
+    async def call_tool(req):
+        return ServerResult(
+            CallToolResult(
+                content=[TextContent(type="text", text="need more")],
+                resultType="input_required",
+            )
         )
+
+    server.request_handlers[CallToolRequest] = call_tool
 
     track(server, "proj_test")
     handler = server.request_handlers[CallToolRequest]
@@ -608,7 +632,10 @@ async def test_intermediate_mrtr_round_is_tagged_but_never_decorated(capture):
     )
 
     assert [block.text for block in result.root.content] == ["need more"]
-    assert result.root.structuredContent is None
+    # See the note in `test_hook_mode`: absence is the claim, and below mcp
+    # 1.10 an unmirrored `structuredContent` is an unset extra rather than a
+    # field holding None.
+    assert getattr(result.root, "structuredContent", None) is None
     event = _call_events(capture)[0]
     assert event.tags["agentcat_mrtr"] == "input_required"
     assert event.session_id.startswith("ses_")

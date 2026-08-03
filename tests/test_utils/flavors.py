@@ -21,9 +21,15 @@ drift silently.
 
 Every ``mcp`` / ``fastmcp`` import is function-local: this module is imported
 by test files that collect under both SDK majors.
-"""
 
-from __future__ import annotations
+No ``from __future__ import annotations`` here, deliberately. PEP 563 would
+stringify the annotations of the tool bodies defined inside ``build()``, and
+``mcp.server.fastmcp``'s ``Tool.from_function`` calls
+``issubclass(param.annotation, Context)`` on mcp 1.7-1.13 — which raises
+``TypeError: issubclass() arg 1 must be a class`` against a string. Nothing in
+this module needs the future import: every annotation is PEP 585/604, which
+Python 3.10 evaluates natively, and no name is used before it is defined.
+"""
 
 import contextlib
 import copy
@@ -265,6 +271,65 @@ class Flavor:
 # ── official MCP SDK 1.x ─────────────────────────────────────────────────────
 
 
+def _backfill_structured_output(fastmcp_server: Any) -> None:
+    """Give a pre-1.10 `mcp.server.fastmcp.FastMCP` the structured output that
+    its later selves produce natively.
+
+    From mcp 1.10 the facade derives an ``outputSchema`` from a tool's return
+    annotation and answers with matching ``structuredContent``. Before that the
+    feature does not exist at all — not spelled differently, absent. But this
+    flavor's contract is "a FastMCP server whose tools declare an output
+    schema", because that is what the cross-flavor parity suites compare
+    against the other five shapes; a flavor that quietly dropped half its
+    contract on old mcp would make those suites read as green while covering
+    less.
+
+    Both patches go on ``_mcp_server.request_handlers`` — the same table the
+    adapter itself wraps, and the one seam whose contract is stable across all
+    of 1.x — so what AgentCat sees here is exactly what it sees on 1.10+.
+    No-ops when the running SDK already does this.
+    """
+    import mcp.types as types
+
+    if "outputSchema" in types.Tool.model_fields:
+        return
+
+    low = fastmcp_server._mcp_server
+    list_inner = low.request_handlers[types.ListToolsRequest]
+    call_inner = low.request_handlers[types.CallToolRequest]
+
+    async def list_handler(req: Any) -> Any:
+        result = await list_inner(req)
+        listed = result.root
+        return types.ServerResult(
+            listed.model_copy(
+                update={
+                    "tools": [
+                        tool.model_copy(
+                            update={"outputSchema": dict(RESULT_OUTPUT_SCHEMA)}
+                        )
+                        for tool in listed.tools
+                    ]
+                }
+            )
+        )
+
+    async def call_handler(req: Any) -> Any:
+        result = await call_inner(req)
+        inner = result.root
+        if inner.isError:
+            return result
+        message = "".join(
+            block.text for block in inner.content if hasattr(block, "text")
+        )
+        return types.ServerResult(
+            inner.model_copy(update={"structuredContent": {"result": message}})
+        )
+
+    low.request_handlers[types.ListToolsRequest] = list_handler
+    low.request_handlers[types.CallToolRequest] = call_handler
+
+
 class OfficialFastMCPV1(Flavor):
     """`mcp.server.fastmcp.FastMCP`, adapted through its `_mcp_server`."""
 
@@ -311,6 +376,7 @@ class OfficialFastMCPV1(Flavor):
         # `seen` is filled at the manager, not in the bodies above: see
         # `record_delivered_arguments` for why a typed body cannot report it.
         record_delivered_arguments(server._tool_manager, built.seen)
+        _backfill_structured_output(server)
         return built
 
     @contextlib.asynccontextmanager
@@ -327,6 +393,31 @@ class OfficialFastMCPV1(Flavor):
         self, client: Any, name: str, arguments: dict[str, Any]
     ) -> Called:
         return _called(await client.call_tool(name, arguments))
+
+    async def call_unlisted(
+        self, server: Any, name: str, arguments: dict[str, Any]
+    ) -> Called:
+        # The raw request, not `call_tool`, for the reason `MCPServerV2` gives:
+        # from mcp 1.15 the convenience method revalidates a result carrying
+        # `structuredContent` against the tool's output schema, and fetches the
+        # listing to do it. That listing is harmless to the rebuild — which has
+        # already happened by then — but fatal to a test that has deliberately
+        # taken the list source down.
+        import mcp.types as types
+
+        async with self.client(server) as client:
+            result = await client.send_request(
+                types.ClientRequest(
+                    types.CallToolRequest(
+                        method="tools/call",
+                        params=types.CallToolRequestParams(
+                            name=name, arguments=arguments
+                        ),
+                    )
+                ),
+                types.CallToolResult,
+            )
+        return _called(result)
 
     def break_list_source(self, server: Any) -> None:
         # The tool manager is what FastMCP's own `tools/list` handler reads,
@@ -390,18 +481,48 @@ class LowlevelV1(OfficialFastMCPV1):
                 raise ListSourceDown("the list source is down")
             return [tool.model_copy(deep=True) for tool in tools]
 
-        @server.call_tool()
-        async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
-            arguments = dict(arguments or {})
-            _reject_unexpected(tool_name, arguments)
-            built.seen.append((tool_name, arguments))
-            if tool_name == "echo" and hook is not None:
-                await hook()
-            message = _answer(tool_name, arguments)
-            return (
-                [types.TextContent(type="text", text=message)],
-                {"result": message},
-            )
+        # Registered straight into `request_handlers` rather than through
+        # `@server.call_tool()`, because the decorator's return CONVENTION is
+        # era-specific and this flavor has to build the same server on every
+        # mcp 1.x. Returning `(content, structured)` needs mcp >= 1.10, and
+        # returning a `CallToolResult` needs >= 1.19; below those the SDK
+        # wraps the value as content and CallToolResult validation fails
+        # INSIDE its own try, yielding a plausible-looking `isError` result
+        # instead of an exception. `request_handlers` is the one seam whose
+        # contract — a `ServerResult` in, a `ServerResult` out — has been
+        # stable since 1.0, and it is the same table AgentCat itself wraps.
+        #
+        # The two behaviours the decorator supplies are reproduced here: a
+        # successful call answers `isError=False`, and ANY raise becomes an
+        # `isError=True` result carrying `str(exc)` — which is what makes
+        # `ToolFailed` and `_reject_unexpected` observable to the tests.
+        async def call_tool_handler(req: Any) -> Any:
+            try:
+                tool_name = req.params.name
+                arguments = dict(req.params.arguments or {})
+                _reject_unexpected(tool_name, arguments)
+                built.seen.append((tool_name, arguments))
+                if tool_name == "echo" and hook is not None:
+                    await hook()
+                message = _answer(tool_name, arguments)
+                return types.ServerResult(
+                    types.CallToolResult(
+                        content=[types.TextContent(type="text", text=message)],
+                        # `Tool`/`CallToolResult` are extra="allow" on every
+                        # 1.x, so this reaches the wire below 1.10 too.
+                        structuredContent={"result": message},
+                        isError=False,
+                    )
+                )
+            except Exception as exc:
+                return types.ServerResult(
+                    types.CallToolResult(
+                        content=[types.TextContent(type="text", text=str(exc))],
+                        isError=True,
+                    )
+                )
+
+        server.request_handlers[types.CallToolRequest] = call_tool_handler
 
         return built
 

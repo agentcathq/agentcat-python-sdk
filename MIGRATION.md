@@ -160,10 +160,10 @@ The session ID is used **verbatim** — never validated, derived or reformatted,
 
 **A server tracked with `enable_tracing=False` publishes no custom events.** Turning tracing off silences this entry point exactly as it silences tool-call events, so a server you deliberately muted does not start emitting a new event type. The session-ID-string form has no options to consult and always publishes.
 
-### Known limitations in 2.0.0b1
+### Known limitations in 2.0.0b2
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** If a tool call spans several round trips and the *first* round is what mints the handle, each round is attributed to its own session instead of one shared session. The other two modes correlate correctly and are protocol-enforced: supplying `session_id` yourself, or deriving it with a `resolve_session_id` hook. If your server relies on multi-round tool calls, prefer one of those two.
-- **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and the upstream returns an error result, no Python exception is raised locally, so the event records the message without a stack trace. Errors raised by your own tool code are unaffected.
+- **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and the upstream returns an error result, no Python exception is raised locally, so the event records the message without a stack trace. Errors raised by your own tool code are unaffected. This applies from fastmcp 3.4, which taught the proxy provider to pass an upstream error result through; on 3.0–3.3 the proxy collapsed it into a raised `ToolError` instead, so those versions do record full detail.
 
 ### Supported versions
 
@@ -177,6 +177,8 @@ The session ID is used **verbatim** — never validated, derived or reformatted,
 | Python | 3.10+ | Unchanged |
 
 One `track()` call handles every supported shape; AgentCat classifies the server it is handed and installs the matching adapter. A shape it does not recognize is logged with a diagnostic fingerprint and returned untracked.
+
+The declared floors are `mcp>=1.2.0,<3` and `fastmcp>=3.0.0,<5`, and every minor in both ranges runs the suite on each change. AgentCat works across the whole range, but the oldest MCP releases lack SDK seams that some features are built on — on `mcp<1.10` a bare low-level handler's exception type and stack frames cannot be recovered (the surfaced message is still published) and there is no structured mint-back; `mcp<1.9.2` captures no request headers; `mcp<1.8` has no Streamable HTTP at all. Nothing breaks on those versions; the affected features simply go quiet. See the table in [README.md](./README.md).
 
 > **Installing into a fresh environment resolves `mcp` 2.x**, which removed `mcp.server.fastmcp`. AgentCat's dependency is `mcp>=1.2.0,<3` and both generations are supported, so an existing project that pins `mcp<2` is unaffected — but a `pip install agentcat` into an empty environment will give you the 2.x line, where the 1.x `from mcp.server.fastmcp import FastMCP` import does not exist. Pin `mcp<2` if you need it.
 

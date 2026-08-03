@@ -1,5 +1,5 @@
 import os
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 # Belt-and-suspenders: force diagnostics off before any test imports/runs, so no
 # test ordering or future change to the auto-disable detection can ever ship OTLP
@@ -8,11 +8,26 @@ from importlib.metadata import version
 os.environ["DISABLE_DIAGNOSTICS"] = "true"
 
 
-# ── Per-era collection gating ────────────────────────────────────────────────
-# The suite runs under two mutually exclusive dependency sets (see pyproject's
-# `mcp-legacy` / `mcp-modern` groups). Era-specific test modules import symbols
-# that exist on only one side, so each era's collection skips the other's.
-MCP_MAJOR = int(version("mcp").split(".")[0])
+# ── Collection gating ────────────────────────────────────────────────────────
+# Three independent reasons a module cannot even be IMPORTED in a given
+# environment. They are accumulated below rather than chosen between: the
+# compatibility matrix runs legs that trip more than one at once (mcp 2.x with
+# fastmcp deliberately uninstalled trips two).
+#
+# This has to happen at collection, not as a `skipif`. Every case here is a
+# module-scope import of a symbol that does not exist, which raises while
+# pytest is importing the module — before any mark on any test inside it runs.
+#
+# Prerelease segments are dropped rather than parsed: `2.0.0b1` yields (2, 0),
+# which orders correctly against every bound used here.
+MCP_VERSION = tuple(int(p) for p in version("mcp").split(".")[:3] if p.isdigit())
+MCP_MAJOR = MCP_VERSION[0]
+
+try:
+    version("fastmcp")
+    HAS_FASTMCP = True
+except PackageNotFoundError:  # the `test-without-fastmcp` matrix legs
+    HAS_FASTMCP = False
 
 _LEGACY_ONLY = (
     "e2e/official",
@@ -44,6 +59,24 @@ _MODERN_ONLY = (
     "test_community_v4_handles.py",
 )
 
+# Needs community FastMCP importable at all, independent of era. The
+# `test-without-fastmcp` matrix legs uninstall it and then verify it is gone,
+# and these trees reach for `fastmcp` while pytest imports them.
+_NEEDS_FASTMCP = (
+    "e2e/community_v3",
+    "e2e/community_v4",
+    "community",
+)
+
+# Needs a Streamable-HTTP transport AND an HTTP request object to inspect.
+# `mcp.client.streamable_http`, `FastMCP.streamable_http_app()` and the
+# `stateless_http` setting all arrive in mcp 1.8.0; `RequestContext.request` —
+# everything `extra.requestInfo` reads — arrives in 1.9.2. Below that there is
+# no transport to exercise and no request to read, so unlike the rest of the
+# old-version work there is nothing to reach into: the capability is absent
+# upstream, not merely spelled differently.
+_NEEDS_REQUEST_CONTEXT = ("e2e/official",)
+
 
 def _ignore_globs(paths: tuple[str, ...]) -> list[str]:
     """Ignore each path itself plus everything beneath it.
@@ -57,3 +90,7 @@ def _ignore_globs(paths: tuple[str, ...]) -> list[str]:
 
 
 collect_ignore_glob = _ignore_globs(_MODERN_ONLY if MCP_MAJOR < 2 else _LEGACY_ONLY)
+if not HAS_FASTMCP:
+    collect_ignore_glob += _ignore_globs(_NEEDS_FASTMCP)
+if MCP_VERSION < (1, 9, 2):
+    collect_ignore_glob += _ignore_globs(_NEEDS_REQUEST_CONTEXT)
