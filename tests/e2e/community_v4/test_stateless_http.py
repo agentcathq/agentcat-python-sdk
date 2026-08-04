@@ -88,5 +88,15 @@ async def test_concurrent_clients_never_wear_each_others_name(
 
     events = _call_events(capture_queue)
     assert len(events) == 2
-    attributed = {e.parameters["arguments"]["text"]: e.client_name for e in events}
-    assert attributed == {"from-cursor": "Cursor", "from-claude": "Claude"}
+    # Version as well as name: they travel together on every rung of the
+    # ladder, and a rung that answered with half an identity would satisfy a
+    # name-only check while leaving `client_version` silently null on every
+    # event a customer segments by.
+    attributed = {
+        e.parameters["arguments"]["text"]: (e.client_name, e.client_version)
+        for e in events
+    }
+    assert attributed == {
+        "from-cursor": ("Cursor", "2.6.22"),
+        "from-claude": ("Claude", "1.0.0"),
+    }

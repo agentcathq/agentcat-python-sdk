@@ -40,12 +40,27 @@ def _last_call(capture_queue):
 async def test_identify_hook_receives_real_request_extra(
     official_http_server, capture_queue
 ):
+    """`extra` carries the live HTTP request, not a placeholder.
+
+    The header read below is verbatim the idiom the README documents for
+    `resolve_session_id` ("receives the same `(request, extra)` pair as
+    `identify`") — keying off a header the customer's gateway set. Only a
+    socket can prove it: the in-process client has no HTTP request at all, so
+    `extra.request` is None there and the assertion would be vacuous.
+
+    Recorded rather than asserted in place: `resolve_identity` swallows every
+    exception the hook raises, so an assertion inside it would surface as a
+    silently anonymous event instead of a failure.
+    """
     url, server = official_http_server
-    received_extras: list = []
+    seen: list = []
 
     def identify(request: Any, extra: Any) -> Optional[UserIdentity]:
-        received_extras.append(extra)
-        return UserIdentity(user_id="alice", user_name="Alice", user_data=None)
+        headers = getattr(getattr(extra, "request", None), "headers", {}) or {}
+        seen.append((getattr(request, "name", None), headers.get("x-identify-hook")))
+        return UserIdentity(
+            user_id="alice", user_name="Alice", user_data={"plan": "pro"}
+        )
 
     _set_identify(server, identify)
     try:
@@ -59,9 +74,14 @@ async def test_identify_hook_receives_real_request_extra(
                 )
 
         time.sleep(0.5)
-        assert received_extras, "identify hook never invoked"
+        assert seen == [("add_todo", "yes")], seen
         ev = _last_call(capture_queue)
+        # All three fields, not just the id: `user_name` and `user_data` are
+        # what a customer segments and displays by, and each lands in a
+        # differently-named event field.
         assert ev.identify_actor_given_id == "alice"
+        assert ev.identify_actor_name == "Alice"
+        assert ev.identify_data == {"plan": "pro"}
     finally:
         _set_identify(server, None)
 

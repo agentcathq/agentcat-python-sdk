@@ -54,6 +54,16 @@ async def test_concurrent_clients_never_wear_each_others_name(
 ):
     """Two named clients at once, on a server that remembers nothing.
 
+    Exact attribution of name AND version, not "in (None, 'Cursor')": on the
+    2026-07-28 wire identity does not depend on a server-side session at all.
+    The client stamps `io.modelcontextprotocol/clientInfo` into `_meta` on every
+    request (`mcp/client/session.py`), and the modern HTTP server re-stamps it
+    from its own negotiation verdict, so the first rung of the ladder answers
+    even here. A `None` on this transport is a regression in the `_meta` rung,
+    not the honest silence it is on the legacy wire — see the sibling assertion
+    in `tests/e2e/official/test_stateless_http.py`, which keeps the looser form
+    for exactly that reason.
+
     Each event is matched to the call that produced it by the argument that
     call sent, so this asserts ATTRIBUTION rather than "both names appear
     somewhere" — a shared identity slot produces one name on both events, and
@@ -75,8 +85,11 @@ async def test_concurrent_clients_never_wear_each_others_name(
 
     events = _call_events(capture_queue)
     assert len(events) == 2
-    attributed = {e.parameters["arguments"]["text"]: e.client_name for e in events}
-    # No name at all is the honest answer for a connection that is gone;
-    # SOMEONE ELSE's name never is.
-    assert attributed["from-cursor"] in (None, "Cursor"), attributed
-    assert attributed["from-claude"] in (None, "Claude"), attributed
+    attributed = {
+        e.parameters["arguments"]["text"]: (e.client_name, e.client_version)
+        for e in events
+    }
+    assert attributed == {
+        "from-cursor": ("Cursor", "2.6.22"),
+        "from-claude": ("Claude", "1.0.0"),
+    }

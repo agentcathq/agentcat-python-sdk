@@ -75,6 +75,63 @@ async def test_identify_reads_the_arguments_off_the_request_it_is_given(
     assert event.identify_data == {"tool": "echo"}
 
 
+@pytest.fixture
+def log_sink():
+    """Everything `write_to_log` tees to diagnostics, as the collector sees it."""
+    from agentcat.modules import logging as agentcat_logging
+
+    previous = agentcat_logging._diagnostics_sink
+    lines: list[str] = []
+    agentcat_logging.set_diagnostics_sink(lines.append)
+    yield lines
+    agentcat_logging.set_diagnostics_sink(previous)
+
+
+@pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
+async def test_an_async_identify_hook_reaches_the_event(flavor, capture, log_sink):
+    """`identify` may be written `async def`, on every server shape.
+
+    This test used to assert the opposite. `resolve_identity` called the hook
+    and took its return value verbatim, so an `async def` was CALLED but never
+    ran — calling it only builds a coroutine — which then failed the
+    `isinstance(result, UserIdentity)` check and published the call anonymously,
+    with no error the customer could see. The inverted version existed to fail
+    the day the contract moved, so the change would be made on purpose rather
+    than discovered. `modules/hooks.py` moved it.
+
+    The hook body running at all is asserted separately from the actor landing:
+    an awaited hook whose result went nowhere and a never-awaited hook both end
+    in an anonymous event, and only the first assertion tells them apart.
+    """
+    body_ran: list[str] = []
+
+    async def identify(request, extra):
+        body_ran.append(request.name)
+        return UserIdentity(
+            user_id=f"user-{request.arguments['text']}",
+            user_name=request.name,
+            user_data={"tool": request.name},
+        )
+
+    built = flavor.build("identify-shape")
+    track(built.server, "proj_test", AgentCatOptions(identify=identify))
+
+    async with flavor.client(built.server) as client:
+        await flavor.list_tools(client)
+        result = await flavor.call(client, "echo", {"text": "hi"})
+
+    assert result.is_error is False
+    assert body_ran == ["echo"], "the coroutine was created but never driven"
+
+    assert len(capture) == 1
+    assert capture[0].identify_actor_given_id == "user-hi"
+    assert capture[0].identify_actor_name == "echo"
+    assert capture[0].identify_data == {"tool": "echo"}
+
+    # The old failure mode logged its way past; nothing should now.
+    assert not [ln for ln in log_sink if "did not return a valid UserIdentity" in ln]
+
+
 @pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
 async def test_every_customer_hook_receives_the_same_pair(flavor, capture):
     """`identify`, `event_tags`, `event_properties` and `resolve_session_id` are

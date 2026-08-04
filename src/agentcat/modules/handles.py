@@ -6,7 +6,6 @@ splits customer sessions across an upgrade.
 """
 
 import hashlib
-import inspect
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -28,6 +27,7 @@ from agentcat.modules.constants import (
     mint_back_confirmed,
     mint_back_session_line,
 )
+from agentcat.modules.hooks import await_hook_result
 from agentcat.modules.logging import write_to_log
 from agentcat.thirdparty.ksuid import Ksuid
 from agentcat.types import AgentCatOptions
@@ -149,9 +149,7 @@ async def resolve_handles(
 
     if callable(hook):
         try:
-            value = hook(request, extra)
-            if inspect.isawaitable(value):
-                value = await value
+            value = await await_hook_result(hook(request, extra), "resolve_session_id")
         except Exception as e:  # hook errors mint silently
             write_to_log(f"Warning: resolve_session_id hook raised: {e}")
             value = None

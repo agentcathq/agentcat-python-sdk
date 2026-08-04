@@ -88,5 +88,16 @@ async def test_two_clients_different_clientinfo_dont_bleed(
     attributed = {e.parameters["arguments"]["text"]: e.client_name for e in call_events}
     # No name at all is the honest answer for a connection that is already
     # gone; SOMEONE ELSE's name never is.
+    #
+    # The tolerance is deliberate and specific to THIS wire. A pre-2026 client
+    # sends `clientInfo` once, in `initialize`, so the only rung that can answer
+    # is the session capture — and a stateless server rebuilds the session per
+    # REQUEST, which means the handshake that carried the name belongs to an
+    # object that no longer exists by the time the call arrives. Absence there
+    # is unknowable, not a defect. On the 2026-07-28 wire the client re-stamps
+    # its identity into `_meta` on every request, so the same scenario IS
+    # strictly attributable and the modern sibling
+    # (`tests/e2e/official_modern/test_stateless_http.py`) asserts exact name
+    # and version. Do not loosen that one to match this.
     assert attributed["from-cursor"] in (None, "Cursor"), attributed
     assert attributed["from-claude"] in (None, "Claude"), attributed

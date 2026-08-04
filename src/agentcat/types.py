@@ -27,7 +27,15 @@ from agentcat.modules.constants import (
 #
 # `event_tags`, `event_properties` and `resolve_session_id` all receive this same
 # pair — see EventTagsFunction / EventPropertiesFunction / ResolveSessionIdFunction.
-IdentifyFunction = Callable[[Any, Any], Optional["UserIdentity"]]
+#
+# Accepts sync or async callables (mirrors RedactionFunction). This alias was the
+# last of the five to say so: `resolve_identity` used to call the hook and take
+# its return value verbatim, so an `async def` hook silently produced an
+# anonymous event. `modules/hooks.py` now defines that contract for all of them.
+IdentifyFunction = Callable[
+    [Any, Any],
+    Optional["UserIdentity"] | Awaitable[Optional["UserIdentity"]],
+]
 # Type alias for redaction function
 RedactionFunction = Callable[[str], str | Awaitable[str]]
 # Type alias for event_tags callback — returns str:str map attached to every auto-captured event.
@@ -188,6 +196,10 @@ class AgentCatOptions:
     enable_tracing: bool = True
     enable_tool_call_context: bool = True
     custom_context_description: str = DEFAULT_CONTEXT_DESCRIPTION
+    # Callback invoked on every auto-captured event to attribute it to an actor.
+    # May be sync or async. Receives the `(request, extra)` pair every other hook
+    # receives. If it raises or returns anything but a UserIdentity, the event
+    # publishes anonymously rather than failing the tool call.
     identify: IdentifyFunction | None = None
     redact_sensitive_information: RedactionFunction | None = None
     exporters: dict[str, ExporterConfig] | None = None

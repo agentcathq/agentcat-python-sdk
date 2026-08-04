@@ -160,7 +160,7 @@ The session ID is used **verbatim** — never validated, derived or reformatted,
 
 **A server tracked with `enable_tracing=False` publishes no custom events.** Turning tracing off silences this entry point exactly as it silences tool-call events, so a server you deliberately muted does not start emitting a new event type. The session-ID-string form has no options to consult and always publishes.
 
-### Known limitations in 2.0.0b2
+### Known limitations in 2.0.0b3
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** If a tool call spans several round trips and the *first* round is what mints the handle, each round is attributed to its own session instead of one shared session. The other two modes correlate correctly and are protocol-enforced: supplying `session_id` yourself, or deriving it with a `resolve_session_id` hook. If your server relies on multi-round tool calls, prefer one of those two.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and the upstream returns an error result, no Python exception is raised locally, so the event records the message without a stack trace. Errors raised by your own tool code are unaffected. This applies from fastmcp 3.4, which taught the proxy provider to pass an upstream error result through; on 3.0–3.3 the proxy collapsed it into a raised `ToolError` instead, so those versions do record full detail.

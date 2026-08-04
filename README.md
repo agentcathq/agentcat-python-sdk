@@ -45,7 +45,7 @@ pip install --pre "agentcat[community]"
 ```
 
 `--pre` is required while 2.x is a prerelease: without it pip skips
-`2.0.0b2` and resolves the 1.x line instead, which has none of the features
+`2.0.0b3` and resolves the 1.x line instead, which has none of the features
 documented below. Drop the flag once a stable 2.0.0 ships.
 
 One `track()` call covers every supported server shape:
@@ -171,6 +171,8 @@ def identify_user(request, extra):
 agentcat.track(server, "proj_0000000", AgentCatOptions(identify=identify_user))
 ```
 
+The hook may be sync or async — `async def identify_user(request, extra)` works the same way, and is the better shape when the lookup is a network call, since a blocking one holds up every other tool call in flight. Returning anything that is not a `UserIdentity`, or raising, publishes the event anonymously rather than failing the call.
+
 ### Bringing your own session IDs
 
 If you already have a correlation ID — a trace ID, a job ID, a header your gateway sets — hand it to AgentCat with `resolve_session_id` and no `session_id` parameter is injected into your tools at all:
@@ -273,7 +275,7 @@ Learn more about our free and open source [telemetry integrations](https://docs.
 
 ### Known limitations
 
-Two behaviors are worth knowing before you read your first dashboard. Both are deliberate for `2.0.0b2`.
+Two behaviors are worth knowing before you read your first dashboard. Both are deliberate for `2.0.0b3`.
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** When a tool call runs several round trips and the *first* round is what mints the handle, each round is attributed to its own session rather than one shared session. Supplying a `session_id` yourself, or deriving one with `resolve_session_id`, correlates the rounds correctly — those two modes are protocol-enforced. Only the mint-on-first-round case is affected.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and that upstream returns an error result, there is no local Python exception to read, so the event records the error message without a stack trace. Errors raised by your own tool code are unaffected and carry full detail.

@@ -1,8 +1,8 @@
 """PII redaction for AgentCat logs."""
 
-import asyncio
-import inspect
 from typing import Any, TYPE_CHECKING, Callable, Set
+
+from agentcat.modules.hooks import drive_hook_result
 
 if TYPE_CHECKING:
     from agentcat.types import Event, UnredactedEvent
@@ -89,10 +89,6 @@ def redact_strings_in_object(
     return obj
 
 
-async def _resolved(awaitable: Any) -> Any:
-    return await awaitable
-
-
 def _sync_redactor(redact_fn: Callable[[str], Any]) -> Callable[[str], Any]:
     """A synchronous view of the customer's hook.
 
@@ -105,13 +101,14 @@ def _sync_redactor(redact_fn: Callable[[str], Any]) -> Callable[[str], Any]:
     security control wins, and this runs off the request's hot path. A hook
     that cannot be driven raises, and the queue drops the event rather than
     publishing it unredacted.
+
+    The driving itself lives in `modules/hooks.py`, which is where all five
+    customer hooks get their answer to "sync or async" — this is the one that
+    cannot simply await, not a different contract.
     """
 
     def redact(value: str) -> Any:
-        result = redact_fn(value)
-        if inspect.isawaitable(result):
-            return asyncio.run(_resolved(result))
-        return result
+        return drive_hook_result(redact_fn(value), "redact_sensitive_information")
 
     return redact
 

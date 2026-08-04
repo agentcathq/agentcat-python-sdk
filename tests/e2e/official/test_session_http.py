@@ -69,6 +69,44 @@ async def test_default_clientinfo_used_when_unspecified(
 
 
 @pytest.mark.asyncio
+async def test_identity_rides_every_call_not_just_the_first(
+    official_http_server, capture_queue
+):
+    """Name AND version on EVERY event of a connection.
+
+    Reading only the last event cannot tell "resolved per request" from
+    "resolved once and reused", and the two differ exactly where it matters: a
+    rung that answers only for the call following the handshake leaves every
+    later event of a long-lived connection anonymous. This is a STATEFUL app,
+    so the `ServerSession` that captured the handshake is still there for all
+    three calls — the rung has to answer more than once.
+    """
+    url, _ = official_http_server
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(
+            read,
+            write,
+            client_info=Implementation(name="Cursor", version="2.6.22"),
+        ) as client:
+            await client.initialize()
+            for n in range(3):
+                await client.call_tool(
+                    "add_todo", {"text": f"call-{n}", "context": "id"}
+                )
+
+    time.sleep(0.5)
+    events = [e for e in capture_queue if e.event_type == "mcp:tools/call"][-3:]
+    assert [e.parameters["arguments"]["text"] for e in events] == [
+        "call-0",
+        "call-1",
+        "call-2",
+    ]
+    assert [(e.client_name, e.client_version) for e in events] == [
+        ("Cursor", "2.6.22")
+    ] * 3
+
+
+@pytest.mark.asyncio
 async def test_clientinfo_with_special_characters(
     official_http_server, capture_queue
 ):

@@ -86,5 +86,14 @@ async def test_two_clients_different_clientinfo_dont_bleed(
     attributed = {e.parameters["arguments"]["text"]: e.client_name for e in call_events}
     # No name at all is the honest answer for a connection that is already
     # gone; SOMEONE ELSE's name never is.
+    #
+    # The tolerance is deliberate and specific to THIS era. FastMCP 3 speaks the
+    # pre-2026 wire, where `clientInfo` travels once, in `initialize` — so the
+    # per-connection capture is the only rung that can answer, and a stateless
+    # server has already discarded the connection that made it. Absence is
+    # unknowable here, not a defect. FastMCP 4 re-stamps identity into `_meta`
+    # on every request, so its sibling
+    # (`tests/e2e/community_v4/test_stateless_http.py`) asserts exact name and
+    # version. Do not loosen that one to match this.
     assert attributed["from-cursor"] in (None, "Cursor"), attributed
     assert attributed["from-claude"] in (None, "Claude"), attributed

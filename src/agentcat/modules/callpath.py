@@ -122,7 +122,7 @@ async def resolve_call(
         injected_parameter_names(tool_name, data.injected_params_registry),
         tool_name not in data.declared_session_params,
     )
-    actor = resolve_identity(data, request, extra)
+    actor = await resolve_identity(data, request, extra)
     client = resolve_client_identity(meta_sources, legacy_client)
     protocol_version = resolve_protocol_version(meta_sources, protocol_fallback)
     # Read from the RAW arguments (pre-strip): the event records what the agent

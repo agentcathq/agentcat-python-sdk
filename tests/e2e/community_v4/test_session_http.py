@@ -92,17 +92,63 @@ async def test_task_handle_is_minted_then_echoed(v4_http_server, capture_queue):
 
 
 async def test_client_identity_reaches_the_event(v4_http_server, capture_queue):
-    """The handshake clientInfo is the last rung of the identity ladder, and it
-    reaches the tools/call event over a real connection."""
+    """Name AND version reach the event over a real connection.
+
+    Asserted against a `client_info` this test supplies rather than against
+    "some name resolved": the SDK's own default satisfies a truthiness check
+    while proving nothing about what the ladder actually read, and
+    `client_version` is null-by-default, so a rung that dropped it would go
+    unnoticed by a name-only assertion.
+    """
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
+    from mcp.types import Implementation
 
     url, _ = v4_http_server
-    async with Client(StreamableHttpTransport(url)) as client:
+    async with Client(
+        StreamableHttpTransport(url),
+        client_info=Implementation(name="MyAgent", version="1.2.3"),
+    ) as client:
         await client.call_tool("add_todo", {"text": "who", "context": "x"})
 
     time.sleep(0.5)
-    assert _call_events(capture_queue)[-1].client_name
+    event = _call_events(capture_queue)[-1]
+    assert (event.client_name, event.client_version) == ("MyAgent", "1.2.3")
+
+
+async def test_identity_rides_every_call_not_just_the_first(
+    v4_http_server, capture_queue
+):
+    """Name AND version on EVERY event of a connection.
+
+    Reading only the last event cannot tell "resolved per request" from
+    "resolved once and reused", and the two differ exactly where it matters: a
+    rung that answers only for the call following the handshake leaves every
+    later event of a long-lived connection anonymous. Three calls, three
+    identities.
+    """
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+    from mcp.types import Implementation
+
+    url, _ = v4_http_server
+    async with Client(
+        StreamableHttpTransport(url),
+        client_info=Implementation(name="Cursor", version="2.6.22"),
+    ) as client:
+        for n in range(3):
+            await client.call_tool("add_todo", {"text": f"call-{n}", "context": "id"})
+
+    time.sleep(0.5)
+    events = _call_events(capture_queue)[-3:]
+    assert [e.parameters["arguments"]["text"] for e in events] == [
+        "call-0",
+        "call-1",
+        "call-2",
+    ]
+    assert [(e.client_name, e.client_version) for e in events] == [
+        ("Cursor", "2.6.22")
+    ] * 3
 
 
 async def test_a_malformed_tools_call_keeps_its_own_protocol_error(

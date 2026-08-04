@@ -108,6 +108,102 @@ async def test_custom_clientinfo_propagates_to_event(
 
 
 @pytest.mark.asyncio
+async def test_identity_rides_every_call_not_just_the_first(
+    modern_http_server, capture_queue
+):
+    """Name AND version on EVERY event of a connection.
+
+    Reading only the last event — which every other identity assertion in the
+    e2e suite used to do — cannot tell "resolved per request" from "resolved
+    once and reused", and the two differ exactly where it matters: a rung that
+    answers only for the call that follows the handshake leaves every later
+    event of a long-lived connection anonymous. Three calls, three identities.
+    """
+    url, _ = modern_http_server
+    async with Client(
+        url, client_info=Implementation(name="Cursor", version="2.6.22")
+    ) as client:
+        for n in range(3):
+            await client.call_tool("add_todo", {"text": f"call-{n}", "context": "id"})
+
+    time.sleep(0.5)
+    events = _call_events(capture_queue)[-3:]
+    assert [e.parameters["arguments"]["text"] for e in events] == [
+        "call-0",
+        "call-1",
+        "call-2",
+    ]
+    assert [(e.client_name, e.client_version) for e in events] == [
+        ("Cursor", "2.6.22")
+    ] * 3
+
+
+@pytest.mark.asyncio
+async def test_identity_comes_from_the_per_request_meta_rung(
+    modern_http_server, capture_queue
+):
+    """The FIRST rung of the ladder, isolated from the handshake rung.
+
+    On the 2026-07-28 wire the client stamps
+    `io.modelcontextprotocol/clientInfo` into `_meta` on every request, so the
+    identity on the event can be read without any handshake state at all. The
+    two rungs are indistinguishable while both agree — so this drives the same
+    connection twice with DIFFERENT identities, which only the per-request
+    envelope can express: a handshake-only ladder reports the first client's
+    name on the second call.
+    """
+    url, _ = modern_http_server
+
+    async def call_as(name: str, version: str, text: str) -> None:
+        async with Client(
+            url, client_info=Implementation(name=name, version=version)
+        ) as client:
+            await client.call_tool("add_todo", {"text": text, "context": "meta"})
+
+    await call_as("First", "1.0.0", "meta-first")
+    await call_as("Second", "2.0.0", "meta-second")
+
+    time.sleep(0.5)
+    events = _call_events(capture_queue)[-2:]
+    assert {
+        e.parameters["arguments"]["text"]: (e.client_name, e.client_version)
+        for e in events
+    } == {
+        "meta-first": ("First", "1.0.0"),
+        "meta-second": ("Second", "2.0.0"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_identity_survives_the_legacy_handshake_rung(
+    modern_http_server, capture_queue
+):
+    """The LAST rung: a legacy client sends `clientInfo` only in `initialize`.
+
+    `mode="legacy"` has no per-request `_meta` envelope to read, so the ladder
+    falls through to the identity the SDK's own `ServerSession` captured at
+    handshake time. On this STATEFUL app that session outlives the handshake,
+    so both calls are still attributed — the rung has to answer more than once.
+    (Under `stateless_http=True` it cannot, which is what the looser assertion
+    in `tests/e2e/official/test_stateless_http.py` records.)
+    """
+    url, _ = modern_http_server
+    async with Client(
+        url,
+        mode="legacy",
+        client_info=Implementation(name="LegacyAgent", version="0.9.0"),
+    ) as client:
+        await client.call_tool("add_todo", {"text": "legacy-1", "context": "id"})
+        await client.call_tool("add_todo", {"text": "legacy-2", "context": "id"})
+
+    time.sleep(0.5)
+    events = _call_events(capture_queue)[-2:]
+    assert [(e.client_name, e.client_version) for e in events] == [
+        ("LegacyAgent", "0.9.0")
+    ] * 2
+
+
+@pytest.mark.asyncio
 async def test_request_headers_ride_the_event(modern_http_server, capture_queue):
     """`parameters.extra.requestInfo.headers` is only reachable from the HTTP
     request the transport attaches to the context — the in-process client has
