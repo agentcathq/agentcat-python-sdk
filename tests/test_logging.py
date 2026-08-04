@@ -1,5 +1,7 @@
 """Tests for the logging module."""
 
+import importlib.metadata
+import platform
 import time
 import uuid
 from unittest.mock import patch
@@ -269,8 +271,74 @@ class TestLogging:
             assert timestamp[13] == ":", "Invalid hour-minute separator"
             assert timestamp[16] == ":", "Invalid minute-second separator"
 
-            # Verify message
-            assert message == test_message, "Message content doesn't match"
+            # Verify message and version suffix:
+            # "MESSAGE | agentcat=… python=… mcp=… fastmcp=…"
+            message_part, suffix = message.rsplit(" | ", 1)
+            assert message_part == test_message, "Message content doesn't match"
+            for key in ("agentcat=", "python=", " mcp=", "fastmcp="):
+                assert key in f" {suffix}", f"Version suffix missing {key.strip()}"
+
+    def test_every_line_carries_version_suffix(self, tmp_path):
+        """Each entry — not just the first — carries the version suffix."""
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+        ):
+            write_to_log(f"first {unique_id}")
+            write_to_log(f"second {unique_id}")
+
+        test_lines = [
+            line
+            for line in log_file.read_text().strip().split("\n")
+            if unique_id in line
+        ]
+        assert len(test_lines) == 2
+        for line in test_lines:
+            for key in ("agentcat=", "python=", " mcp=", "fastmcp="):
+                assert key in line, f"{key.strip()} missing from line: {line}"
+
+    def test_version_suffix_values_are_truthful(self, tmp_path):
+        """The suffix reports the real installed/runtime versions."""
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+        ):
+            write_to_log(f"versions {unique_id}")
+
+        content = log_file.read_text()
+        assert f"agentcat={importlib.metadata.version('agentcat')}" in content
+        assert f"python={platform.python_version()}" in content
+
+    def test_missing_distribution_reported_absent(self, tmp_path):
+        """A distribution that cannot be resolved shows as `absent`, not an error."""
+        from agentcat.modules.logging import _version_suffix
+
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        _version_suffix.cache_clear()
+        try:
+            with (
+                patch("agentcat.utils.get_dist_version", return_value=None),
+                patch(
+                    "agentcat.modules.logging.os.path.expanduser",
+                    return_value=str(log_file),
+                ),
+            ):
+                write_to_log(f"absent {unique_id}")
+        finally:
+            _version_suffix.cache_clear()
+
+        content = log_file.read_text()
+        assert " mcp=absent" in content
+        assert " fastmcp=absent" in content
 
 
 class TestEnvDebugMode:

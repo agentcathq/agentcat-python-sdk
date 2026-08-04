@@ -1,5 +1,6 @@
 """Utility functions for AgentCat."""
 
+import functools
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -16,6 +17,22 @@ def get_agentcat_version() -> str | None:
         import importlib.metadata
 
         return importlib.metadata.version("agentcat")
+    except Exception:
+        return None
+
+
+@functools.cache
+def get_dist_version(name: str) -> str | None:
+    """Best-effort installed-distribution version; None when absent.
+
+    Shared by the log-line version suffix, the diagnostics beacon, and the
+    OTLP exporter to stamp the MCP SDK in use (`mcp` and/or `fastmcp`), so
+    the lookup runs once per distribution per process.
+    """
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version(name)
     except Exception:
         return None
 

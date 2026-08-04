@@ -1,10 +1,10 @@
 """Logging functionality for AgentCat."""
 
+import functools
 import os
+import platform
 from collections.abc import Callable
 from datetime import datetime, timezone
-
-from agentcat.types import AgentCatOptions
 
 
 def _env_debug_mode() -> bool:
@@ -36,9 +36,27 @@ def set_diagnostics_sink(fn: Callable[[str], None] | None) -> None:
     _diagnostics_sink = fn
 
 
+@functools.lru_cache(maxsize=1)
+def _version_suffix() -> str:
+    """Environment stamp appended to every log entry, computed once per process.
+
+    A shared log excerpt must never leave the reader guessing which AgentCat
+    SDK, Python, or MCP SDK produced it; `absent` for an uninstalled MCP
+    distribution is itself a diagnostic.
+    """
+    from agentcat.utils import get_agentcat_version, get_dist_version
+
+    return (
+        f"agentcat={get_agentcat_version() or 'unknown'} "
+        f"python={platform.python_version()} "
+        f"mcp={get_dist_version('mcp') or 'absent'} "
+        f"fastmcp={get_dist_version('fastmcp') or 'absent'}"
+    )
+
+
 def write_to_log(message: str) -> None:
     timestamp = datetime.now(timezone.utc).isoformat()
-    log_entry = f"[{timestamp}] {message}"
+    log_entry = f"[{timestamp}] {message} | {_version_suffix()}"
 
     # Tee to diagnostics FIRST — independent of debug_mode. Must never break logging.
     if _diagnostics_sink is not None:

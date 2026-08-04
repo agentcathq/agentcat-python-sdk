@@ -167,6 +167,10 @@ def _build_static_attributes(project_id: str | None) -> list[dict[str, Any]]:
             out += _attr("agentcat.mcp_sdk.version", version("mcp"))
         except Exception:
             pass
+        try:
+            out += _attr("agentcat.fastmcp_sdk.version", version("fastmcp"))
+        except Exception:
+            pass
 
         # Runtime
         out += _attr("process.runtime.name", platform.python_implementation().lower())

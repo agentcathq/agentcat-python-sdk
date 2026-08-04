@@ -1,5 +1,7 @@
 """Tests for static OTLP resource attributes (identity + environment)."""
 
+import importlib.metadata
+
 import pytest
 
 from agentcat.modules import diagnostics
@@ -56,3 +58,17 @@ def test_sdk_and_environment_metadata_present():
     assert attrs.get("os.type")
     assert attrs.get("process.runtime.name")
     assert attrs.get("process.runtime.version")
+
+
+def test_mcp_sdk_version_attributes():
+    """Both MCP SDK distributions are reported when installed, omitted when not."""
+    diagnostics.init_diagnostics("proj_1")
+    attrs = _attrs()
+    assert attrs.get("agentcat.mcp_sdk.version") == importlib.metadata.version("mcp")
+
+    try:
+        fastmcp_version = importlib.metadata.version("fastmcp")
+    except importlib.metadata.PackageNotFoundError:
+        assert "agentcat.fastmcp_sdk.version" not in attrs
+    else:
+        assert attrs.get("agentcat.fastmcp_sdk.version") == fastmcp_version

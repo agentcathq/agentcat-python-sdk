@@ -20,9 +20,10 @@ def test_sink_receives_every_entry():
 
     assert len(seen) == 1
     assert "hello world" in seen[0]
-    # Sink gets the timestamped, newline-free entry.
+    # Sink gets the timestamped, newline-free entry, version suffix included.
     assert seen[0].startswith("[")
     assert "\n" not in seen[0]
+    assert "agentcat=" in seen[0]
 
 
 def test_sink_raising_never_breaks_write_to_log():
