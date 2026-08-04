@@ -38,15 +38,11 @@ This SDK also provides a free and simple way to forward telemetry like logs, tra
 
 ```bash
 # Basic installation (includes official MCP SDK)
-pip install --pre agentcat
+pip install agentcat
 
 # With Jlowin's/Prefect's FastMCP support
-pip install --pre "agentcat[community]"
+pip install "agentcat[community]"
 ```
-
-`--pre` is required while 2.x is a prerelease: without it pip skips
-`2.0.0b3` and resolves the 1.x line instead, which has none of the features
-documented below. Drop the flag once a stable 2.0.0 ships.
 
 One `track()` call covers every supported server shape:
 
@@ -275,7 +271,7 @@ Learn more about our free and open source [telemetry integrations](https://docs.
 
 ### Known limitations
 
-Two behaviors are worth knowing before you read your first dashboard. Both are deliberate for `2.0.0b3`.
+Two behaviors are worth knowing before you read your first dashboard. Both are deliberate in the 2.x line.
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** When a tool call runs several round trips and the *first* round is what mints the handle, each round is attributed to its own session rather than one shared session. Supplying a `session_id` yourself, or deriving one with `resolve_session_id`, correlates the rounds correctly — those two modes are protocol-enforced. Only the mint-on-first-round case is affected.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and that upstream returns an error result, there is no local Python exception to read, so the event records the error message without a stack trace. Errors raised by your own tool code are unaffected and carry full detail.

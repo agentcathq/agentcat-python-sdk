@@ -49,12 +49,10 @@ Three of them changed *behavior*, and all three are covered below: `identify` an
 If your integration is a bare `track(server, "proj_...")` with no callbacks, upgrading is a version bump. Handles are injected and stripped inside the SDK, so your tool handlers never see the extra parameters, and handles keep landing in the `session_id` field with the `ses_` prefix — your existing dashboards, queries, and exporter pipelines keep working untouched. If you pass callbacks, read the two sections above first: both changes are one-line edits, but both are silent if you skip them.
 
 ```bash
-pip install --pre --upgrade "agentcat>=2"
+pip install --upgrade "agentcat>=2"
 # or, for Jlowin's/Prefect's FastMCP support:
-pip install --pre --upgrade "agentcat[community]>=2"
+pip install --upgrade "agentcat[community]>=2"
 ```
-
-`--pre` while 2.x is a prerelease; drop it once a stable 2.0.0 ships. (Plain `pip install agentcat` skips prereleases entirely and resolves the 1.x line.)
 
 ### Update your code only if…
 
@@ -160,7 +158,7 @@ The session ID is used **verbatim** — never validated, derived or reformatted,
 
 **A server tracked with `enable_tracing=False` publishes no custom events.** Turning tracing off silences this entry point exactly as it silences tool-call events, so a server you deliberately muted does not start emitting a new event type. The session-ID-string form has no options to consult and always publishes.
 
-### Known limitations in 2.0.0b3
+### Known limitations in 2.0
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** If a tool call spans several round trips and the *first* round is what mints the handle, each round is attributed to its own session instead of one shared session. The other two modes correlate correctly and are protocol-enforced: supplying `session_id` yourself, or deriving it with a `resolve_session_id` hook. If your server relies on multi-round tool calls, prefer one of those two.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and the upstream returns an error result, no Python exception is raised locally, so the event records the message without a stack trace. Errors raised by your own tool code are unaffected. This applies from fastmcp 3.4, which taught the proxy provider to pass an upstream error result through; on 3.0–3.3 the proxy collapsed it into a raised `ToolError` instead, so those versions do record full detail.
