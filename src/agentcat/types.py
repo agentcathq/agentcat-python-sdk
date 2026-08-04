@@ -191,7 +191,9 @@ class AgentCatOptions:
     identify: IdentifyFunction | None = None
     redact_sensitive_information: RedactionFunction | None = None
     exporters: dict[str, ExporterConfig] | None = None
-    debug_mode: bool = False
+    # Debug logging to ~/agentcat.log. Tri-state: None (the default) defers to
+    # the AGENTCAT_DEBUG_MODE env var read at import; explicit True/False wins.
+    debug_mode: bool | None = None
     api_base_url: str | None = None
     # Disables AgentCat's internal SDK diagnostics — anonymous, metadata-only
     # setup/error reporting used to detect failed installs. On by default; also

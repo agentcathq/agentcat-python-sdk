@@ -301,3 +301,65 @@ class TestEnvDebugMode:
         from agentcat.modules.logging import _env_debug_mode
 
         assert _env_debug_mode() is False
+
+
+class TestTrackDebugModePrecedence:
+    """track() must honor: explicit option > AGENTCAT_DEBUG_MODE seed > off."""
+
+    @pytest.fixture(autouse=True)
+    def reset_debug_mode(self):
+        yield
+        set_debug_mode(False)
+
+    def _track(self, tmp_path, **track_kwargs):
+        """Run track(object()) with ~/agentcat.log redirected to tmp_path.
+
+        The untrackable object takes the early no-project/no-exporters warning
+        path in _apply_tracking, which write_to_log's — enough to observe the
+        debug gate without touching the event queue.
+        """
+        import agentcat
+
+        log_file = tmp_path / "agentcat.log"
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser",
+            return_value=str(log_file),
+        ):
+            agentcat.track(object(), **track_kwargs)
+        return log_file
+
+    def test_default_options_preserve_env_seeded_debug_mode(self, tmp_path):
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(True)  # simulate AGENTCAT_DEBUG_MODE=true import seed
+        log_file = self._track(tmp_path)
+
+        assert logging_module.debug_mode is True, (
+            "track() with default options clobbered the env-seeded debug flag"
+        )
+        assert log_file.exists(), "debug log was not written"
+        assert "Failed to track server" in log_file.read_text()
+
+    def test_explicit_true_enables_logging(self, tmp_path):
+        import agentcat
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(False)
+        log_file = self._track(
+            tmp_path, options=agentcat.AgentCatOptions(debug_mode=True)
+        )
+
+        assert logging_module.debug_mode is True
+        assert log_file.exists()
+
+    def test_explicit_false_overrides_env_seed(self, tmp_path):
+        import agentcat
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(True)  # simulate env seed
+        log_file = self._track(
+            tmp_path, options=agentcat.AgentCatOptions(debug_mode=False)
+        )
+
+        assert logging_module.debug_mode is False
+        assert not log_file.exists()

@@ -85,7 +85,8 @@ def track(
         if options is None:
             options = AgentCatOptions()
 
-        set_debug_mode(options.debug_mode)
+        if options.debug_mode is not None:
+            set_debug_mode(options.debug_mode)
 
         # Initialize internal diagnostics before anything can fail, so even an
         # invalid setup still emits a failure beacon. Never throws into the host.
