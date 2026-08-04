@@ -702,3 +702,51 @@ def test_the_installed_official_sdk_classifies_as_a_lowlevel_v1_flavor():
     detected = detect_server(lowlevel)
     assert detected.flavor is ServerFlavor.LOWLEVEL_V1
     assert detected.lowlevel is lowlevel
+
+
+async def test_wrapped_list_preserves_meta_and_extra_result_fields(capture):
+    """Audit finding 11: the v1 tools/list rebuild used to reconstruct
+    `ListToolsResult(tools=..., nextCursor=...)`, silently dropping `_meta`
+    and any extra fields a raw list handler set. The result must now be a
+    `model_copy` of the customer's own object — injection applied, everything
+    else intact (mcp 1.x `Result` is extra='allow')."""
+    from mcp.server.lowlevel import Server
+    from mcp.types import ListToolsRequest, ListToolsResult, ServerResult, Tool
+
+    server = Server("meta-server")
+
+    async def list_tools(req):
+        return ServerResult(
+            ListToolsResult(
+                tools=[
+                    Tool(
+                        name="echo",
+                        description="Echo the text back.",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {"text": {"type": "string"}},
+                        },
+                    )
+                ],
+                nextCursor="page-2",
+                # The aliased spelling: this mcp generation does not populate
+                # the `meta` field by name, only via its `_meta` alias.
+                **{"_meta": {"total": 41}},
+                cacheHint="warm",  # an extra field, allowed by Result
+            )
+        )
+
+    server.request_handlers[ListToolsRequest] = list_tools
+
+    track(server, "proj_test", AgentCatOptions())
+    handler = server.request_handlers[ListToolsRequest]
+    result = await handler(ListToolsRequest(method="tools/list"))
+
+    listed = result.root
+    # Injection happened...
+    echo = next(t for t in listed.tools if t.name == "echo")
+    assert "session_id" in echo.inputSchema["properties"]
+    # ...and nothing the customer's handler set was dropped.
+    assert listed.nextCursor == "page-2"
+    assert listed.meta == {"total": 41}
+    assert getattr(listed, "cacheHint", None) == "warm"

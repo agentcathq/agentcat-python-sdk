@@ -165,7 +165,6 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
     from mcp.types import (
         CallToolRequest,
         ListToolsRequest,
-        ListToolsResult,
         ServerResult,
         TextContent,
         Tool,
@@ -236,17 +235,33 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
             annotations=annotations,
         )
 
-    def advertised_tools(original: Any, options: Any) -> list[Any]:
+    def advertised_tools(
+        original: Any, options: Any
+    ) -> tuple[list[Any], set[int]]:
         """Deep copies of the listed tools, plus get_more_tools when enabled.
 
         Copies because the injection pipeline rewrites schemas in place and
-        FastMCP hands out the very dict its tool manager holds.
+        FastMCP hands out the very dict its tool manager holds. A tool whose
+        copy fails is carried through VERBATIM (the customer's object, never
+        given to the pipeline) with its id() in the returned skip set — one
+        uncopyable tool must not take down the whole listing.
         """
         nonlocal agentcat_advertises_get_more_tools
         tools: list[Any] = []
+        skipped: set[int] = set()
         listed = getattr(getattr(original, "root", None), "tools", None)
         if isinstance(listed, list):
-            tools = [tool.model_copy(deep=True) for tool in listed]
+            for tool in listed:
+                try:
+                    tools.append(tool.model_copy(deep=True))
+                except Exception as e:
+                    write_to_log(
+                        "Warning: could not copy tool "
+                        f"'{getattr(tool, 'name', '<unnamed>')}' for injection; "
+                        f"serving it verbatim without handle parameters - {e}"
+                    )
+                    tools.append(tool)
+                    skipped.add(id(tool))
         customer_owns_get_more_tools = any(
             getattr(tool, "name", None) == GET_MORE_TOOLS_NAME for tool in tools
         )
@@ -257,11 +272,16 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         # context pass skips it by name, so early placement cannot double-inject.
         if agentcat_advertises_get_more_tools:
             tools.append(make_get_more_tools())
-        return tools
+        return tools, skipped
 
-    def specs_for(tools: list[Any]) -> list[ToolSpec]:
+    def specs_for(tools: list[Any], skipped: set[int]) -> list[ToolSpec | None]:
+        """Specs aligned index-for-index with `tools`; None for skipped ones."""
         return [
-            ToolSpec(tool.name, tool.inputSchema, getattr(tool, "outputSchema", None))
+            None
+            if id(tool) in skipped
+            else ToolSpec(
+                tool.name, tool.inputSchema, getattr(tool, "outputSchema", None)
+            )
             for tool in tools
         ]
 
@@ -271,16 +291,19 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         if list_handler is None:
             return []
         listed = await list_handler(ListToolsRequest(method="tools/list"))
-        return specs_for(advertised_tools(listed, current_data().options))
+        tools, skipped = advertised_tools(listed, current_data().options)
+        return [spec for spec in specs_for(tools, skipped) if spec is not None]
 
     async def wrapped_list(request: Any) -> Any:
         listed = await original(_LIST)(request)
         tracking = current_data()
         try:
-            tools = advertised_tools(listed, tracking.options)
-            specs = specs_for(tools)
+            tools, skipped = advertised_tools(listed, tracking.options)
+            specs = specs_for(tools, skipped)
             injected = build_injected_schemas(
-                specs, tracking.options, tracking.reported_conflicts
+                [spec for spec in specs if spec is not None],
+                tracking.options,
+                tracking.reported_conflicts,
             )
             tracking.injected_params_registry = injected.injected_params
             tracking.output_injection_registry = injected.output_injected
@@ -289,17 +312,15 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
             # one did not see.
             tracking.declared_session_params |= injected.declared_session_params
             for tool, spec in zip(tools, specs, strict=True):
+                if spec is None:
+                    continue  # uncopyable tool: served verbatim, never mutated
                 tool.inputSchema = spec.input_schema
                 if spec.output_schema is not None:
                     tool.outputSchema = spec.output_schema
-            # Rebuild the result rather than mutate the original: nextCursor and
-            # any other fields the customer's handler set are carried over.
-            return ServerResult(
-                ListToolsResult(
-                    tools=tools,
-                    nextCursor=getattr(listed.root, "nextCursor", None),
-                )
-            )
+            # A copy of the customer's result rather than a rebuilt one: _meta
+            # and any extra fields their handler set survive (Result is
+            # extra='allow' on 1.x), exactly like the v2 adapter.
+            return ServerResult(listed.root.model_copy(update={"tools": tools}))
         except Exception as e:
             write_to_log(
                 "Warning: tools/list injection failed, serving the customer's "

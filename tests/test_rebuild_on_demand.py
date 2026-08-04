@@ -182,6 +182,85 @@ CAN_ANSWER_WITH_A_DOWN_LIST_SOURCE = [
 ]
 
 
+LOWLEVEL_V2_ONLY = [flavor for flavor in flavors() if flavor.id == "lowlevel-v2"]
+
+
+@pytest.mark.parametrize("flavor", LOWLEVEL_V2_ONLY, ids=lambda f: f.id)
+async def test_rebuild_survives_a_list_registration_with_no_params_type(
+    flavor, capture, log_sink
+):
+    """Audit finding 4c: a `tools/list` registration carrying no params_type
+    made rebuild-on-demand call the customer's list handler with params=None.
+    A handler that dereferences its params then crashed the rebuild — and the
+    degraded strip branded the call's arguments. The fallback params must be
+    the real all-optional model, so the rebuild SUCCEEDS.
+    """
+    import dataclasses
+
+    built = flavor.build("rebuild-bare")
+    entry = built.server._request_handlers["tools/list"]
+    inner = getattr(entry, "handler", entry)
+
+    async def dereferencing_list(ctx, params, _inner=inner):
+        _ = params.cursor  # a customer handler that trusts its params
+        return await _inner(ctx, params)
+
+    if hasattr(entry, "handler"):
+        built.server._request_handlers["tools/list"] = dataclasses.replace(
+            entry, handler=dereferencing_list, params_type=None
+        )
+    else:  # pre-2.0 development line stored the bare callable
+        built.server._request_handlers["tools/list"] = dereferencing_list
+
+    track(built.server, "proj_test", AgentCatOptions())
+    await flavor.call_unlisted(
+        built.server, "echo", {"text": "hi", SESSION_ID_PARAM: SUPPLIED}
+    )
+
+    assert _logged(log_sink, "Rebuilt injection registries on demand")
+    assert not _logged(log_sink, "rebuild-on-demand failed")
+    assert built.seen == [("echo", {"text": "hi"})]
+    assert capture[0].session_id == SUPPLIED
+
+
+@pytest.mark.parametrize(
+    "flavor", CAN_ANSWER_WITH_A_DOWN_LIST_SOURCE, ids=lambda f: f.id
+)
+async def test_a_failed_rebuild_spares_a_customers_own_session_id(
+    flavor, capture, log_sink
+):
+    """Audit finding 4: registry unknown + a tool that declares its own
+    `session_id`. The old fallback deleted the customer's value by name and
+    appended a correction telling the agent to stop sending their parameter.
+    The shape-aware fallback must do neither: a non-minted value is presumed
+    the customer's, reaches their handler, and draws no wire correction —
+    while the event honestly records the call as sessionless.
+    """
+    built = flavor.build("rebuild-down-owned", customer_session_id=True)
+    track(built.server, "proj_test", AgentCatOptions())
+    flavor.break_list_source(built.server)
+    data = tracking_data(built.server)
+
+    result = await flavor.call_unlisted(
+        built.server, "complete_task", {"session_id": "TICKET-9", "note": "done"}
+    )
+
+    assert _logged(log_sink, "rebuild-on-demand failed")
+    assert data.injected_params_registry is None
+
+    # The customer's parameter survived the degraded strip and reached them.
+    assert built.seen == [
+        ("complete_task", {"session_id": "TICKET-9", "note": "done"})
+    ]
+    # No "session_id not recognized" correction steering agents away from the
+    # customer's own parameter.
+    assert "not recognized" not in (result.text or "")
+    # Sessionless, tagged for the dashboard — the honest degraded record.
+    event = capture[0]
+    assert event.session_id is None
+    assert event.tags[AGENTCAT_TAG_SESSION_SOURCE] == "invalid"
+
+
 @pytest.mark.parametrize(
     "flavor", CAN_ANSWER_WITH_A_DOWN_LIST_SOURCE, ids=lambda f: f.id
 )

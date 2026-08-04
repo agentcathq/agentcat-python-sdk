@@ -310,7 +310,7 @@ class TestTruncationWithTodoServer:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)

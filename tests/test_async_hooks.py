@@ -98,9 +98,17 @@ def _coroutine(value: Any):
 
 
 def _task(value: Any):
-    """A Task, which only exists because the hook is called inside a loop."""
+    """A Task-returning hook, async because Tasks only exist on a loop.
 
-    def hook(_request: Any, _extra: Any) -> Any:
+    Since run_hook, the hook CALL runs on a worker thread with no running
+    loop, so a SYNC hook can no longer call asyncio APIs — that is a
+    documented v2 behavior change (MIGRATION.md). An async hook's body runs
+    on the loop as always, and its returned Task pins the awaitable-unwrap
+    regression: run_hook must await the coroutine AND then the Task it
+    returned, not assign either into the event verbatim.
+    """
+
+    async def hook(_request: Any, _extra: Any) -> Any:
         return asyncio.ensure_future(_coroutine(value)(None, None))
 
     return hook

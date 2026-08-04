@@ -167,7 +167,7 @@ def identify_user(request, extra):
 agentcat.track(server, "proj_0000000", AgentCatOptions(identify=identify_user))
 ```
 
-The hook may be sync or async — `async def identify_user(request, extra)` works the same way, and is the better shape when the lookup is a network call, since a blocking one holds up every other tool call in flight. Returning anything that is not a `UserIdentity`, or raising, publishes the event anonymously rather than failing the call.
+The hook may be sync or async — `async def identify_user(request, extra)` works the same way. A sync hook runs on a worker thread, so a blocking lookup stalls only its own call, never the rest of your server; note that this means a *sync* hook cannot use asyncio APIs (make it `async def` if it needs the loop). Every hook runs under a 5-second cap — a slower one is logged and its call proceeds anonymously. Returning anything that is not a `UserIdentity`, or raising, publishes the event anonymously rather than failing the call.
 
 ### Bringing your own session IDs
 
@@ -275,6 +275,16 @@ Two behaviors are worth knowing before you read your first dashboard. Both are d
 
 - **Multi-round tool calls that mint their own handle land on separate sessions.** When a tool call runs several round trips and the *first* round is what mints the handle, each round is attributed to its own session rather than one shared session. Supplying a `session_id` yourself, or deriving one with `resolve_session_id`, correlates the rounds correctly — those two modes are protocol-enforced. Only the mint-on-first-round case is affected.
 - **Errors forwarded from a proxied community tool carry no stack detail.** When a community FastMCP server proxies a tool to an upstream server and that upstream returns an error result, there is no local Python exception to read, so the event records the error message without a stack trace. Errors raised by your own tool code are unaffected and carry full detail.
+
+### Shutdown behavior
+
+AgentCat never touches your process lifecycle: no signal handlers, no forced
+exits, and no exit-time event drain. Every SDK thread is a daemon, so your
+shutdown — `Ctrl-C`, `SIGTERM`, `sys.exit()` — runs exactly as it would
+untracked, and is never delayed by AgentCat. The trade: telemetry still queued
+at the moment the process exits is dropped rather than flushed. The one exit
+hook the SDK keeps is the internal-diagnostics beacon below — skipped when
+there is nothing buffered, capped at ~2 seconds when there is.
 
 ### Internal diagnostics
 

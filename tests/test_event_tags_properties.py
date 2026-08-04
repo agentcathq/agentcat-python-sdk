@@ -191,7 +191,7 @@ class TestFastMCPIntegration:
     async def test_callbacks_flow_through_to_published_event(self):
         captured = []
         mock_api = MagicMock()
-        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request: captured.append(publish_event_request))
+        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request, **kwargs: captured.append(publish_event_request))
         set_event_queue(EventQueue(api_client=mock_api))
 
         server = create_todo_server()
@@ -222,7 +222,7 @@ class TestFastMCPIntegration:
     async def test_callback_exception_does_not_break_publish(self):
         captured = []
         mock_api = MagicMock()
-        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request: captured.append(publish_event_request))
+        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request, **kwargs: captured.append(publish_event_request))
         set_event_queue(EventQueue(api_client=mock_api))
 
         def boom(req, ctx):
@@ -246,7 +246,7 @@ class TestFastMCPIntegration:
     async def test_async_callbacks_flow_through_to_published_event(self):
         captured = []
         mock_api = MagicMock()
-        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request: captured.append(publish_event_request))
+        mock_api.publish_event = MagicMock(side_effect=lambda publish_event_request, **kwargs: captured.append(publish_event_request))
         set_event_queue(EventQueue(api_client=mock_api))
 
         async def async_tags(req, ctx):

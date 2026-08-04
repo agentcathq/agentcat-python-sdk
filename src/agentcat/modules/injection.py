@@ -342,15 +342,30 @@ def build_injected_schemas(
 
 
 def injected_parameter_names(
-    tool_name: str, registry: dict[str, set[str]] | None
+    tool_name: str,
+    registry: dict[str, set[str]] | None,
+    arguments: dict[str, Any] | None = None,
+    options: AgentCatOptions | None = None,
 ) -> frozenset[str]:
     """The parameter names AgentCat injected into `tool_name`.
 
     With a registry, a listed tool reports exactly its recorded entry and an
     unlisted tool reports nothing (it was never advertised through the
     pipeline). Without one (tools/call before any tools/list, and the rebuild
-    failed) fall back to all three names — except get_more_tools' bespoke
-    context, which is a real parameter.
+    failed) the fallback mirrors `build_injected_schemas`' own inject gates
+    instead of blanket-claiming all three names, so a customer-declared
+    parameter is only ever at risk when its name AND shape AND the enabled
+    options all collide:
+
+    - `session_id` counts as ours iff prompted-mode tracing would have
+      injected it (`enable_tracing` on, no `resolve_session_id` hook) AND the
+      value the agent sent is absent or matches our minted `ses_` KSUID shape.
+      A non-minted value is presumed the customer's own parameter: it is not
+      stripped, and — because this same set feeds `resolve_handles` — it is
+      not branded invalid or corrected on the wire either.
+    - `agent_id` counts as ours iff agent tracking would have injected it.
+    - `context` counts as ours iff `enable_tool_call_context` is on
+      (get_more_tools' bespoke context is always a real parameter).
 
     Single source of truth for both consumers, deliberately: what
     `strip_injected_arguments` removes before the customer's handler runs is
@@ -363,18 +378,38 @@ def injected_parameter_names(
     """
     if registry is not None:
         return frozenset(registry.get(tool_name, ()))
-    if tool_name == GET_MORE_TOOLS_NAME:
-        return frozenset((SESSION_ID_PARAM, AGENT_ID_PARAM))
-    return frozenset(_ALL_INJECTABLE)
+
+    # Local import: handles.py does not import this module, so no cycle.
+    from agentcat.modules.handles import is_valid_session_id
+
+    opts = options if options is not None else AgentCatOptions()
+    args = arguments or {}
+
+    names: set[str] = set()
+    if opts.enable_tracing and opts.resolve_session_id is None:
+        value = args.get(SESSION_ID_PARAM)
+        looks_minted = value is None or (
+            isinstance(value, str) and is_valid_session_id(value.strip())
+        )
+        if looks_minted:
+            names.add(SESSION_ID_PARAM)
+    if opts.enable_tracing and opts.enable_agent_tracking:
+        names.add(AGENT_ID_PARAM)
+    if opts.enable_tool_call_context and tool_name != GET_MORE_TOOLS_NAME:
+        names.add(CONTEXT_PARAM)
+    return frozenset(names)
 
 
 def strip_injected_arguments(
     tool_name: str,
     arguments: dict[str, Any],
     registry: dict[str, set[str]] | None,
+    options: AgentCatOptions | None = None,
 ) -> dict[str, Any]:
     """Return a new dict with ONLY the params AgentCat injected removed."""
-    names: Iterable[str] = injected_parameter_names(tool_name, registry)
+    names: Iterable[str] = injected_parameter_names(
+        tool_name, registry, arguments, options
+    )
     cleaned = dict(arguments)
     for name in names:
         cleaned.pop(name, None)

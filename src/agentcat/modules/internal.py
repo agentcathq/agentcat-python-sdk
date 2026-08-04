@@ -9,7 +9,7 @@ from ..types import AgentCatData, UnredactedEvent
 # `_get_server_key`. detection.py imports nothing from this module, so this
 # does not close a cycle.
 from .detection import _probe as _attribute_present
-from .hooks import await_hook_result
+from .hooks import run_hook
 from .logging import write_to_log
 from .validation import validate_tags
 
@@ -112,7 +112,7 @@ async def resolve_event_tags(
         return None
 
     try:
-        result = await await_hook_result(callback(request, extra), "event_tags")
+        result = await run_hook(callback, "event_tags", request, extra)
     except Exception as e:
         write_to_log(f"event_tags callback error: {e}")
         return None
@@ -136,7 +136,7 @@ async def resolve_event_properties(
         return None
 
     try:
-        result = await await_hook_result(callback(request, extra), "event_properties")
+        result = await run_hook(callback, "event_properties", request, extra)
     except Exception as e:
         write_to_log(f"event_properties callback error: {e}")
         return None

@@ -1,14 +1,17 @@
-"""Event queue implementation for AgentCat."""
+"""Event queue implementation for AgentCat.
 
-import atexit
+Process-safety contract: importing this module must be side-effect free
+beyond object construction — no threads, no signal handlers, no atexit
+hooks. Workers start lazily on first publish, are always daemon, and are
+never drained at interpreter exit: telemetry may be lost on shutdown, the
+customer's process may never be delayed or redirected by it.
+"""
+
 import queue
-import signal
-import os
 import sys
 import threading
 import time
 from datetime import datetime, timezone
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -28,6 +31,11 @@ from .truncation import truncate_event
 # Stamped on every event. Same value 1.x reported, resolved once at import
 # instead of rebuilt per event inside a per-server session cache.
 SDK_LANGUAGE = f"Python {sys.version_info.major}.{sys.version_info.minor}"
+
+# Bound on a single publish HTTP attempt so a black-holed connection can
+# wedge a worker for at most this long. Lives here, not constants.py — that
+# file is byte-parity with the TS SDK and this knob is Python-only.
+PUBLISH_TIMEOUT_SECONDS = 10
 
 
 class EventQueue:
@@ -50,12 +58,30 @@ class EventQueue:
         self._shutdown = False
         self._shutdown_event = threading.Event()
 
-        # Thread pool for processing events
-        self.executor = ThreadPoolExecutor(max_workers=self.concurrency)
+        # Workers start lazily on first add() so constructing the queue —
+        # which happens at module import — spawns no threads and is safe
+        # from any thread, main or not.
+        self._lock = threading.Lock()
+        self._workers: list[threading.Thread] = []
+        self._workers_started = False
+        self._active = 0  # workers currently inside _process_event
 
-        # Start worker thread
-        self.worker_thread = threading.Thread(target=self._worker, daemon=True)
-        self.worker_thread.start()
+    def _ensure_workers(self) -> None:
+        """Start the consumer threads on first use."""
+        if self._workers_started:
+            return
+        with self._lock:
+            if self._workers_started or self._shutdown:
+                return
+            for i in range(self.concurrency):
+                t = threading.Thread(
+                    target=self._worker,
+                    daemon=True,
+                    name=f"agentcat-event-worker-{i}",
+                )
+                t.start()
+                self._workers.append(t)
+            self._workers_started = True
 
     def configure(self, api_base_url: str) -> None:
         """Reconfigure the API client with a new base URL."""
@@ -69,6 +95,7 @@ class EventQueue:
             write_to_log("Queue is shutting down, event dropped")
             return
 
+        self._ensure_workers()
         try:
             # Try to add without blocking
             self.queue.put_nowait(event)
@@ -79,32 +106,26 @@ class EventQueue:
             )
 
     def _worker(self) -> None:
-        """Worker thread that processes events from the queue."""
+        """Consumer thread: pulls events straight off the bounded queue.
+
+        No intermediate executor — when every worker is busy the bounded
+        queue fills and add() drops, so memory is genuinely capped at
+        max_queue_size events.
+        """
         while not self._shutdown_event.is_set():
             try:
-                # Wait for an event with timeout
                 event = self.queue.get(timeout=0.1)
-
-                # Submit event processing to thread pool
-                # The executor will queue it if all workers are busy
-                try:
-                    self.executor.submit(self._process_event, event)
-                except Exception as e:
-                    write_to_log(f"Failed to submit event for processing: {e}")
-                    # Put the event back in the queue if possible
-                    try:
-                        self.queue.put_nowait(event)
-                    except queue.Full:
-                        write_to_log(
-                            f"Could not requeue event {event.id or 'unknown'} - queue full"
-                        )
-
             except queue.Empty:
                 continue
+            with self._lock:
+                self._active += 1
+            try:
+                self._process_event(event)
             except Exception as e:
                 write_to_log(f"Worker thread error (continuing): {e}")
-                # Sleep briefly to avoid tight error loops
-                time.sleep(0.1)
+            finally:
+                with self._lock:
+                    self._active -= 1
 
     def _process_event(self, event: UnredactedEvent) -> None:
         """Process a single event."""
@@ -117,7 +138,9 @@ class EventQueue:
                 # The redacted event is already the full event object, not a dict
                 event = redacted_event
                 event.redaction_fn = None  # Clear the function to avoid reprocessing
-            except Exception as error:
+            except (Exception, SystemExit) as error:
+                # SystemExit included: a customer hook calling sys.exit() must
+                # not kill the worker thread.
                 write_to_log(
                     f"WARNING: Dropping event {event.id or 'unknown'} due to redaction failure: {error}"
                 )
@@ -159,8 +182,12 @@ class EventQueue:
     def _send_event(self, event: Event, retries: int = 0) -> None:
         """Send event to API."""
         try:
-            # Synchronous API call
-            self.api_client.publish_event(publish_event_request=event)
+            # Synchronous API call, bounded so a black-holed connection
+            # cannot wedge this worker indefinitely
+            self.api_client.publish_event(
+                publish_event_request=event,
+                _request_timeout=PUBLISH_TIMEOUT_SECONDS,
+            )
             write_to_log(
                 f"Successfully sent event {event.id} | {event.event_type} | "
                 f"session {event.session_id} | {event.project_id} | "
@@ -191,40 +218,33 @@ class EventQueue:
 
     def get_stats(self) -> dict[str, Any]:
         """Get queue stats for monitoring."""
+        with self._lock:
+            active = self._active
         return {
             "queueLength": self.queue.qsize(),
-            "activeRequests": self.executor._threads.__len__(),  # Number of active threads
-            "isProcessing": self.executor._threads.__len__() > 0,
+            "activeRequests": active,
+            "isProcessing": active > 0,
         }
 
     def destroy(self) -> None:
-        """Graceful shutdown - wait for active requests."""
-        # Stop accepting new events
+        """Stop workers and stop accepting events. Bounded; for tests and
+        explicit shutdown — nothing registers it at exit anymore. A worker
+        wedged in a customer hook outlives the join as a daemon and dies
+        with the process.
+        """
         self._shutdown = True
         self._shutdown_event.set()
 
-        # Determine wait time based on queue state
-        if self.queue.qsize() > 0:
-            # If there are events in queue, wait 5 seconds
-            wait_time = 5.0
-            write_to_log(
-                f"Shutting down with {self.queue.qsize()} events in queue, waiting up to {wait_time}s"
-            )
-        else:
-            # If queue is empty, just wait 1 second for in-flight requests
-            wait_time = 1.0
-            write_to_log(f"Queue empty, waiting {wait_time}s for in-flight requests")
+        # Shared 1s budget across all joins, never per-thread.
+        deadline = time.monotonic() + 1.0
+        for t in self._workers:
+            if t is threading.current_thread():
+                continue  # destroy() called from a worker
+            t.join(timeout=max(0.0, deadline - time.monotonic()))
 
-        # Wait for the specified time
-        time.sleep(wait_time)
-
-        # Shutdown executor, cancelling any queued (not yet running) tasks
-        self.executor.shutdown(wait=True, cancel_futures=True)
-
-        # Log final status
         remaining = self.queue.qsize()
         if remaining > 0:
-            write_to_log(f"Shutdown complete. {remaining} events were not processed.")
+            write_to_log(f"Event queue destroyed with {remaining} events unprocessed.")
 
         # Flush any buffered SDK diagnostics on the way out. Lazy import to avoid
         # an import cycle; never let diagnostics break shutdown.
@@ -255,24 +275,11 @@ def set_telemetry_manager(manager: Optional["TelemetryManager"]) -> None:
         )
 
 
-# Global event queue instance
+# Global event queue instance. Constructing it starts no threads (workers
+# are lazy), so this module is importable from any thread. The SDK installs
+# no signal handlers and no exit hooks for events: the customer's process
+# owns its own shutdown, and undelivered telemetry is dropped by design.
 event_queue = EventQueue()
-
-
-def _shutdown_handler(signum, frame):
-    """Handle shutdown signals."""
-
-    write_to_log("Received shutdown signal, gracefully shutting down...")
-
-    # Reset signal handlers to default behavior to avoid recursive calls
-    signal.signal(signal.SIGINT, signal.SIG_DFL)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
-    # Perform graceful shutdown
-    event_queue.destroy()
-
-    # Force exit after graceful shutdown
-    os._exit(0)
 
 
 def set_event_queue(new_queue: EventQueue) -> None:
@@ -281,12 +288,6 @@ def set_event_queue(new_queue: EventQueue) -> None:
     # Destroy the old queue first
     event_queue.destroy()
     event_queue = new_queue
-
-
-# Register shutdown handlers
-signal.signal(signal.SIGINT, _shutdown_handler)
-signal.signal(signal.SIGTERM, _shutdown_handler)
-atexit.register(lambda: event_queue.destroy())
 
 
 def publish_event(server: Any, event: UnredactedEvent) -> None:

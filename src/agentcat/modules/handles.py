@@ -27,7 +27,7 @@ from agentcat.modules.constants import (
     mint_back_confirmed,
     mint_back_session_line,
 )
-from agentcat.modules.hooks import await_hook_result
+from agentcat.modules.hooks import run_hook
 from agentcat.modules.logging import write_to_log
 from agentcat.thirdparty.ksuid import Ksuid
 from agentcat.types import AgentCatOptions
@@ -149,7 +149,7 @@ async def resolve_handles(
 
     if callable(hook):
         try:
-            value = await await_hook_result(hook(request, extra), "resolve_session_id")
+            value = await run_hook(hook, "resolve_session_id", request, extra)
         except Exception as e:  # hook errors mint silently
             write_to_log(f"Warning: resolve_session_id hook raised: {e}")
             value = None

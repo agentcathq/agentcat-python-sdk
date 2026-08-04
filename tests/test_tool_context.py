@@ -629,7 +629,7 @@ class TestUserIntentCaptureInEvents:
         mock_api_client = MagicMock()
         captured_events = []
         mock_api_client.publish_event = MagicMock(
-            side_effect=lambda publish_event_request: captured_events.append(
+            side_effect=lambda publish_event_request, **kwargs: captured_events.append(
                 publish_event_request
             )
         )

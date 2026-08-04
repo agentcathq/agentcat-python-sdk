@@ -10,13 +10,21 @@ answer it at all: it called the hook and used the return value verbatim, so an
 `isinstance(result, UserIdentity)` check and published the call anonymously.
 The customer saw no error — only an event with no actor.
 
-Two entry points, because the SDK runs hooks from two places:
+Three entry points, because the SDK runs hooks from three places:
 
-* `await_hook_result` — the request path. Every adapter reaches the hooks
-  through `await resolve_call(...)` and `await publish_tool_call_event(...)`,
-  on every mcp and fastmcp version in the compatibility matrix, so there is a
-  running loop and awaiting is all it takes.
-* `drive_hook_result` — the publish worker (`event_queue.EventQueue._worker`),
+* `run_hook` — the request path's containment boundary. The hook CALL runs on
+  an anyio worker thread (a blocking sync hook stalls only its own request,
+  never the server's event loop — the same offload both FastMCP generations
+  give customers' sync tool bodies), awaitable results are awaited inline,
+  and the whole execution sits under a hard timeout. Every failure mode —
+  raise, wrong thread-behavior, timeout, even SystemExit or a spontaneous
+  CancelledError — surfaces as `HookExecutionError`, a plain Exception, so
+  each call site's own `except Exception` degradation rule applies unchanged.
+  Genuine task cancellation (client disconnect) still propagates.
+* `await_hook_result` — resolves a hook's RETURN VALUE on a path with a
+  running loop. `run_hook` uses it internally; adapters no longer call it
+  directly for customer hooks.
+* `drive_hook_result` — the publish worker (`event_queue.EventQueue`),
   a daemon THREAD with no event loop of its own. Redaction runs there and
   cannot await, so an awaitable has to be driven to completion with a loop of
   its own.
@@ -37,12 +45,29 @@ what came back needs none of those special cases.
 
 import asyncio
 import inspect
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, cast
+
+import anyio
+import anyio.to_thread
 
 from agentcat.modules.logging import write_to_log
 
 T = TypeVar("T")
+
+# Hard cap on one hook execution. Generous for a lookup, small enough that a
+# wedged hook costs one request its metadata instead of stalling the call.
+HOOK_TIMEOUT_SECONDS = 5.0
+
+# An async hook may legitimately return an awaitable of an awaitable (a hook
+# returning an asyncio.Task of a cached lookup); unwrap a few hops, not forever.
+_MAX_AWAIT_HOPS = 3
+
+
+class HookExecutionError(Exception):
+    """A customer hook failed, timed out, or raised something that must not
+    ride the request path. Deliberately a plain Exception: every call site's
+    existing `except Exception` degradation rule catches it unchanged."""
 
 # Both signatures below spell `T | Awaitable[Any]` inline rather than sharing an
 # alias. A generic alias needs `Union[T, ...]` — mypy rejects a TypeVar as the
@@ -71,6 +96,84 @@ def _report(hook_name: str, error: Exception) -> None:
     write_to_log(
         f"Warning: {hook_name} returned an awaitable that could not be awaited: {error}"
     )
+
+
+async def run_hook(
+    hook: Callable[..., Any],
+    hook_name: str,
+    request: Any,
+    extra: Any,
+    timeout: float = HOOK_TIMEOUT_SECONDS,
+) -> Any:
+    """Execute a customer hook with full containment. The request-path entry.
+
+    Threading: the CALL runs via `anyio.to_thread.run_sync`, so a sync hook
+    that blocks (a DB lookup, an HTTP call) suspends only this request — the
+    loop keeps serving every other call. `abandon_on_cancel=True` lets the
+    timeout fire while the hook still blocks; the abandoned hook keeps running
+    on its daemon worker thread with its result discarded, and can never hold
+    the process open. An async hook's coroutine is awaited inline on the loop
+    (same as before), under the same timeout.
+
+    Exceptions-as-values across the thread boundary make cancellation
+    unambiguous: a `CancelledError`/`SystemExit` the hook itself raises comes
+    back as data and becomes `HookExecutionError`, so any `CancelledError`
+    surfacing from the awaits here is, by construction, the enclosing task
+    being cancelled — and is re-raised. (On the async-hook path, Python 3.11+
+    can additionally distinguish a spontaneous CancelledError via
+    `Task.cancelling()`; on 3.10 it is conservatively re-raised.)
+
+    Behavior notes, both documented in MIGRATION.md: a sync hook that calls
+    asyncio APIs must become `async def` (worker threads have no running
+    loop), and a hook slower than `timeout` degrades that call exactly like a
+    hook that raised.
+    """
+
+    def _call_contained() -> tuple[str, Any]:
+        try:
+            return ("ok", hook(request, extra))
+        except KeyboardInterrupt:
+            raise
+        except BaseException as e:  # noqa: BLE001 — the containment boundary
+            return ("raised", e)
+
+    try:
+        with anyio.fail_after(timeout):
+            status, payload = await anyio.to_thread.run_sync(
+                _call_contained, abandon_on_cancel=True
+            )
+            if status == "raised":
+                raise HookExecutionError(
+                    f"{hook_name} hook raised {type(payload).__name__}: {payload}"
+                ) from payload
+            value = payload
+            hops = 0
+            while inspect.isawaitable(value) and hops < _MAX_AWAIT_HOPS:
+                value = await await_hook_result(value, hook_name)
+                hops += 1
+            return value
+    except HookExecutionError:
+        raise
+    except TimeoutError:
+        write_to_log(
+            f"Warning: {hook_name} hook timed out after {timeout}s; "
+            "proceeding without its result"
+        )
+        raise HookExecutionError(f"{hook_name} hook timed out") from None
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        cancelling = getattr(task, "cancelling", None)
+        if callable(cancelling) and cancelling() == 0:
+            # 3.11+: no external cancel is pending, so the async hook raised
+            # CancelledError spontaneously — contained, not propagated.
+            raise HookExecutionError(
+                f"{hook_name} hook raised CancelledError outside a cancellation"
+            ) from None
+        raise  # genuine task cancellation (or 3.10, which cannot probe)
+    except (Exception, SystemExit) as e:
+        raise HookExecutionError(
+            f"{hook_name} hook raised {type(e).__name__}: {e}"
+        ) from e
 
 
 async def await_hook_result(value: T | Awaitable[Any], hook_name: str) -> T:
@@ -111,6 +214,18 @@ def drive_hook_result(value: T | Awaitable[Any], hook_name: str) -> T:
     except Exception as e:
         _report(hook_name, e)
         raise
+    except (SystemExit, asyncio.CancelledError) as e:
+        # On a worker thread there is no enclosing task, so either of these
+        # from the awaitable is definitionally the hook's own doing. Convert
+        # to a plain Exception so the caller's drop-the-event rule applies
+        # instead of the worker thread dying.
+        write_to_log(
+            f"Warning: {hook_name} returned an awaitable that raised "
+            f"{type(e).__name__}; treating as hook failure"
+        )
+        raise HookExecutionError(
+            f"{hook_name} hook raised {type(e).__name__}"
+        ) from e
 
 
 async def _resolved(awaitable: Any) -> Any:

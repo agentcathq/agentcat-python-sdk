@@ -44,7 +44,7 @@ def _capture_into(sink: list):
     passing vacuously.
     """
 
-    def capture(publish_event_request):
+    def capture(publish_event_request, **kwargs):
         sink.append(publish_event_request)
 
     return capture
@@ -276,7 +276,7 @@ class TestExtraOnPublishedEvents:
         mock_api_client = MagicMock()
         captured_events: list = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -305,7 +305,7 @@ class TestExtraOnPublishedEvents:
         mock_api_client = MagicMock()
         captured_events: list = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)

@@ -14,6 +14,7 @@ from agentcat.modules.exceptions import (
     extract_context_line,
     filename_for_module,
     format_exception_string,
+    is_call_tool_result,
     is_in_app,
     parse_python_traceback,
     stringify_non_exception,
@@ -449,7 +450,7 @@ class TestExceptionIntegration:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -726,6 +727,145 @@ class TestExceptionIntegration:
         assert event.is_error is True
         assert event.error is not None
         assert "Invalid parameters" in event.error["message"]
+
+
+class TestCaptureExceptionNeverRaises:
+    """Audit findings 7/8: capture_exception runs at adapter sites OUTSIDE
+    every other guard, so an escape replaces the customer's result or original
+    error on the wire. Whatever the input does, it must return an ErrorData."""
+
+    def test_hostile_str_degrades_to_repr(self):
+        class BrokenStr(Exception):
+            def __str__(self):
+                raise RuntimeError("hostile __str__")
+
+        result = capture_exception(BrokenStr("x"))
+        assert result["type"] == "BrokenStr"
+        assert result["platform"] == "python"
+        assert isinstance(result["message"], str)
+
+    def test_hostile_chained_cause_keeps_the_clean_outer_error(self):
+        """The TS-parity killer case: the customer's own exception is CLEAN,
+        only its chained cause has a broken __str__. The framework would have
+        delivered the customer's message fine; so must we."""
+
+        class BrokenCause(Exception):
+            def __str__(self):
+                raise RuntimeError("hostile cause")
+
+        try:
+            try:
+                raise BrokenCause()
+            except BrokenCause as cause:
+                raise ValueError("customer's real message") from cause
+        except ValueError as e:
+            result = capture_exception(e)
+
+        assert result["message"] == "customer's real message"
+        assert result["type"] == "ValueError"
+        # The poisoned link degrades, it does not disappear or raise.
+        assert result.get("chained_errors"), "cause chain lost entirely"
+
+    def test_deleted_cwd_keeps_frames_with_raw_paths(self, monkeypatch):
+        """os.path.abspath calls os.getcwd() for relative co_filenames
+        ('<string>', exec'd plugin frames) and raises under a deleted working
+        directory. Frames must survive with the raw path."""
+        import agentcat.modules.exceptions as exc_module
+
+        def raising_abspath(path):
+            raise FileNotFoundError("cwd was deleted")
+
+        monkeypatch.setattr(exc_module.os.path, "abspath", raising_abspath)
+
+        try:
+            exec(compile("raise ValueError('from exec')", "<string>", "exec"))
+        except ValueError as e:
+            result = capture_exception(e)
+
+        assert result["message"] == "from exec"
+        assert result["type"] == "ValueError"
+        assert result.get("frames"), "frames dropped instead of degrading"
+
+    def test_raising_content_property_is_not_a_call_tool_result(self):
+        class LazyProxyResult:
+            is_error = True
+
+            @property
+            def content(self):
+                raise RuntimeError("upstream proxy gone")
+
+        assert is_call_tool_result(LazyProxyResult()) is False
+        result = capture_exception(LazyProxyResult())
+        assert result["platform"] == "python"
+        assert isinstance(result["message"], str)
+
+    def test_outer_guard_returns_minimal_fallback(self, monkeypatch):
+        """If the detailed capture itself breaks, the fallback still names the
+        exception type and publishes."""
+        import agentcat.modules.exceptions as exc_module
+
+        def broken_capture(exc):
+            raise RuntimeError("capture machinery broke")
+
+        monkeypatch.setattr(exc_module, "_capture_exception", broken_capture)
+
+        result = capture_exception(ValueError("original"))
+        assert result["type"] == "ValueError"
+        assert result["platform"] == "python"
+        assert "unavailable" in result["message"]
+
+    async def test_hostile_tool_exception_still_publishes_an_event(self):
+        """Integration: a tracked tool raising a hostile exception ends in a
+        published event carrying error data — never a protocol-level crash."""
+        captured = []
+        mock_api = MagicMock()
+        mock_api.publish_event = MagicMock(
+            side_effect=lambda publish_event_request, **kw: captured.append(
+                publish_event_request
+            )
+        )
+        queue = EventQueue(api_client=mock_api)
+        set_event_queue(queue)
+
+        try:  # whichever todo server this dependency leg provides
+            from .test_utils.modern_server import (
+                create_mcpserver_todo_server,
+                create_modern_client,
+            )
+
+            server = create_mcpserver_todo_server()
+            make_client = create_modern_client
+        except ImportError:
+            server = create_todo_server()
+            make_client = create_test_client
+
+        @server.tool()
+        def hostile_tool() -> str:
+            class Hostile(Exception):
+                def __str__(self):
+                    raise RuntimeError("hostile")
+
+            raise Hostile("boom")
+
+        track(server, "proj_test", AgentCatOptions())
+        async with make_client(server) as client:
+            try:
+                await client.call_tool("hostile_tool", {})
+            except Exception:
+                # A tool-error RESULT surfaced client-side is a valid answer;
+                # the wire-level regression is asserted through the event below.
+                pass
+        time.sleep(1.0)
+
+        events = [
+            e
+            for e in captured
+            if e.event_type == "mcp:tools/call" and e.resource_name == "hostile_tool"
+        ]
+        assert events, "hostile exception suppressed the event entirely"
+        assert events[0].is_error is True
+        assert events[0].error is not None
+        assert events[0].error["platform"] == "python"
 
 
 if __name__ == "__main__":

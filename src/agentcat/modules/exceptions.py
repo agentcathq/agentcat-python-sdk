@@ -12,7 +12,44 @@ from agentcat.types import ChainedErrorData, ErrorData, StackFrame
 from agentcat.modules.constants import MAX_EXCEPTION_CHAIN_DEPTH, MAX_STACK_FRAMES
 
 
+def _safe_str(value: Any) -> str:
+    """str() for values whose __str__ may itself raise (customer exception
+    classes are arbitrary code). Degrades str -> repr -> placeholder."""
+    try:
+        return str(value)
+    except Exception:
+        try:
+            return repr(value)
+        except Exception:
+            return f"<unprintable {type(value).__name__}>"
+
+
 def capture_exception(exc: BaseException | Any) -> ErrorData:
+    """Never-raise entry point around _capture_exception.
+
+    It runs on the request path at call sites outside every other guard
+    (evaluated as the `error=` argument before publish's own containment), so
+    an escape here would replace the customer's result or original error on
+    the wire. Anything the detailed capture chokes on — hostile __str__,
+    deleted working directory, raising properties — degrades to a minimal
+    ErrorData instead.
+    """
+    try:
+        return _capture_exception(exc)
+    except Exception:
+        error: ErrorData = {
+            "message": "Error details unavailable (exception capture failed)",
+            "type": None,
+            "platform": "python",
+        }
+        try:
+            error["type"] = type(exc).__name__  # type() runs no customer code
+        except Exception:
+            pass
+        return error
+
+
+def _capture_exception(exc: BaseException | Any) -> ErrorData:
     """
     Captures detailed exception information including stack traces and cause chains.
 
@@ -38,7 +75,7 @@ def capture_exception(exc: BaseException | Any) -> ErrorData:
         }
 
     error_data: ErrorData = {
-        "message": str(exc),
+        "message": _safe_str(exc),
         "type": type(exc).__name__,
         "platform": "python",
     }
@@ -75,31 +112,40 @@ def parse_python_traceback(tb: types.TracebackType | None) -> list[StackFrame]:
     count = 0
 
     while current_tb is not None and count < MAX_STACK_FRAMES:
-        frame = current_tb.tb_frame
-        abs_path = os.path.abspath(frame.f_code.co_filename)
-
         try:
-            module = frame.f_globals.get("__name__")
-        except (AttributeError, KeyError):
-            module = None
+            frame = current_tb.tb_frame
+            try:
+                # abspath calls os.getcwd() for relative filenames
+                # ('<string>', exec'd frames), which raises when the process
+                # working directory has been deleted — keep the raw path then.
+                abs_path = os.path.abspath(frame.f_code.co_filename)
+            except Exception:
+                abs_path = frame.f_code.co_filename
 
-        in_app = is_in_app(abs_path)
+            try:
+                module = frame.f_globals.get("__name__")
+            except (AttributeError, KeyError):
+                module = None
 
-        frame_dict: StackFrame = {
-            "filename": filename_for_module(module, abs_path),
-            "abs_path": abs_path,
-            "function": frame.f_code.co_name or "<module>",
-            "module": module or "",
-            "lineno": current_tb.tb_lineno,
-            "in_app": in_app,
-        }
+            in_app = is_in_app(abs_path)
 
-        if in_app:
-            context = extract_context_line(abs_path, current_tb.tb_lineno)
-            if context:
-                frame_dict["context_line"] = context
+            frame_dict: StackFrame = {
+                "filename": filename_for_module(module, abs_path),
+                "abs_path": abs_path,
+                "function": frame.f_code.co_name or "<module>",
+                "module": module or "",
+                "lineno": current_tb.tb_lineno,
+                "in_app": in_app,
+            }
 
-        frames.append(frame_dict)
+            if in_app:
+                context = extract_context_line(abs_path, current_tb.tb_lineno)
+                if context:
+                    frame_dict["context_line"] = context
+
+            frames.append(frame_dict)
+        except Exception:
+            pass  # one unreadable frame skips, the rest of the stack survives
 
         current_tb = current_tb.tb_next
         count += 1
@@ -253,40 +299,47 @@ def unwrap_exception_chain(exc: BaseException) -> list[ChainedErrorData]:
     seen_ids.add(id(exc))
 
     while current is not None and depth < MAX_EXCEPTION_CHAIN_DEPTH:
-        if getattr(current, "__suppress_context__", False):
-            next_exc = getattr(current, "__cause__", None)
-        else:
-            next_exc = getattr(current, "__context__", None)
+        try:
+            # Guarded as a block: __cause__/__context__/__suppress_context__
+            # can be hostile descriptors on exception subclasses, and a
+            # chained link's __str__ was never exercised by the framework —
+            # a poisoned link truncates the chain instead of raising.
+            if getattr(current, "__suppress_context__", False):
+                next_exc = getattr(current, "__cause__", None)
+            else:
+                next_exc = getattr(current, "__context__", None)
 
-        if next_exc is None:
+            if next_exc is None:
+                break
+
+            exc_id = id(next_exc)
+            if exc_id in seen_ids:
+                break
+            seen_ids.add(exc_id)
+
+            if not isinstance(next_exc, BaseException):
+                chain.append(
+                    {
+                        "message": stringify_non_exception(next_exc),
+                        "type": None,
+                    }
+                )
+                break
+
+            chained_data: ChainedErrorData = {
+                "message": _safe_str(next_exc),
+                "type": type(next_exc).__name__,
+            }
+
+            if next_exc.__traceback__:
+                chained_data["frames"] = parse_python_traceback(next_exc.__traceback__)
+                chained_data["stack"] = format_exception_string(next_exc)
+
+            chain.append(chained_data)
+            current = next_exc
+            depth += 1
+        except Exception:
             break
-
-        exc_id = id(next_exc)
-        if exc_id in seen_ids:
-            break
-        seen_ids.add(exc_id)
-
-        if not isinstance(next_exc, BaseException):
-            chain.append(
-                {
-                    "message": stringify_non_exception(next_exc),
-                    "type": None,
-                }
-            )
-            break
-
-        chained_data: ChainedErrorData = {
-            "message": str(next_exc),
-            "type": type(next_exc).__name__,
-        }
-
-        if next_exc.__traceback__:
-            chained_data["frames"] = parse_python_traceback(next_exc.__traceback__)
-            chained_data["stack"] = format_exception_string(next_exc)
-
-        chain.append(chained_data)
-        current = next_exc
-        depth += 1
 
     # TODO: Add ExceptionGroup support for Python 3.11+
     # ExceptionGroups have .exceptions attribute with multiple exceptions
@@ -310,7 +363,7 @@ def format_exception_string(exc: BaseException) -> str:
     try:
         return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     except Exception:
-        return f"{type(exc).__name__}: {exc}"
+        return f"{type(exc).__name__}: {_safe_str(exc)}"
 
 
 def is_call_tool_result(value: Any) -> bool:
@@ -339,11 +392,17 @@ def is_call_tool_result(value: Any) -> bool:
     Returns:
         True if value is a CallToolResult object
     """
-    return (
-        value is not None
-        and (hasattr(value, "is_error") or hasattr(value, "isError"))
-        and isinstance(getattr(value, "content", None), list)
-    )
+    try:
+        # Whole predicate guarded: `content` may be an arbitrary property
+        # (lazy proxied results) that raises something other than
+        # AttributeError, which getattr's default would not suppress.
+        return (
+            value is not None
+            and (hasattr(value, "is_error") or hasattr(value, "isError"))
+            and isinstance(getattr(value, "content", None), list)
+        )
+    except Exception:
+        return False
 
 
 def capture_call_tool_result_error(result: Any) -> ErrorData:
@@ -410,7 +469,7 @@ def stringify_non_exception(value: Any) -> str:
 
         return json.dumps(value)
     except Exception:
-        return str(value)
+        return _safe_str(value)
 
 
 # The inner-tap trio that used to live here — `store_captured_error` /

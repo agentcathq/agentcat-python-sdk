@@ -119,7 +119,9 @@ async def resolve_call(
         data.project_id,
         request,
         extra,
-        injected_parameter_names(tool_name, data.injected_params_registry),
+        injected_parameter_names(
+            tool_name, data.injected_params_registry, raw_arguments, data.options
+        ),
         tool_name not in data.declared_session_params,
     )
     actor = await resolve_identity(data, request, extra)
@@ -152,9 +154,12 @@ async def get_stripped_arguments(
     `tools/list` rebuilds the registries on demand from the adapter's list
     source (§6.3); the injection pipeline is deterministic, so a rebuilt
     registry matches what any listing instance advertised. Only a failed
-    rebuild falls back to the heuristic strip — and it clears the
-    output-injection registry, so the structured mirror stops gating on
-    knowledge we no longer have (§3.4b).
+    rebuild falls back to the shape+config-aware strip (see
+    `injected_parameter_names`): a name is removed only when the enabled
+    options would have injected it AND, for `session_id`, the value matches
+    our minted shape — a customer-declared parameter rides through to their
+    handler. The fallback also clears the output-injection registry, so the
+    structured mirror stops gating on knowledge we no longer have (§3.4b).
     """
     registry = data.injected_params_registry
     if registry is None and rebuild is not None:
@@ -182,7 +187,7 @@ async def get_stripped_arguments(
                 "Rebuilt injection registries on demand "
                 "(tools/call before tools/list on this instance)"
             )
-    return strip_injected_arguments(tool_name, raw_arguments, registry)
+    return strip_injected_arguments(tool_name, raw_arguments, registry, options)
 
 
 def detect_mrtr(

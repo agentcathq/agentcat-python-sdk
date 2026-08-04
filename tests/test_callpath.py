@@ -259,6 +259,9 @@ async def test_rebuild_failure_falls_back_to_heuristic(monkeypatch):
     async def broken_rebuild() -> list[ToolSpec]:
         raise RuntimeError("list source gone")
 
+    # "s" is not a minted-shape handle: on the degraded path it is presumed
+    # the customer's own parameter and rides through to their handler; only
+    # context — which default options would have injected — is stripped.
     out = await get_stripped_arguments(
         data,
         data.options,
@@ -266,9 +269,20 @@ async def test_rebuild_failure_falls_back_to_heuristic(monkeypatch):
         {"q": 1, "session_id": "s", "context": "c"},
         broken_rebuild,
     )
-    assert out == {"q": 1}
+    assert out == {"q": 1, "session_id": "s"}
     assert data.output_injection_registry is None  # mirror gate bypassed
     assert any("list source gone" in entry for entry in logged)
+
+    # A minted-shape value is ours even without a registry.
+    data2 = make_data()
+    out2 = await get_stripped_arguments(
+        data2,
+        data2.options,
+        "t",
+        {"q": 1, "session_id": sid("mine"), "context": "c"},
+        broken_rebuild,
+    )
+    assert out2 == {"q": 1}
 
 
 # Two calls can race the rebuild on a server that never served tools/list.
@@ -303,14 +317,26 @@ async def test_a_failed_rebuild_does_not_wipe_a_concurrent_success():
 
 
 # No rebuild hook at all (adapter has no list source): straight to the
-# heuristic, and get_more_tools keeps its own `context` parameter (§6.6).
+# shape+config-aware fallback, and get_more_tools keeps its own `context`
+# parameter (§6.6).
 async def test_strip_without_rebuild_uses_the_heuristic():
     data = make_data()
-    raw = {"q": 1, "session_id": "s", "agent_id": "a", "context": "c"}
-    assert await get_stripped_arguments(data, data.options, "t", raw, None) == {"q": 1}
+    # Minted-shape session_id is ours; agent_id survives (tracking off by
+    # default); context is ours by config.
+    raw = {"q": 1, "session_id": sid("m"), "agent_id": "a", "context": "c"}
+    assert await get_stripped_arguments(data, data.options, "t", raw, None) == {
+        "q": 1,
+        "agent_id": "a",
+    }
     assert await get_stripped_arguments(
         data, data.options, "get_more_tools", raw, None
-    ) == {"q": 1, "context": "c"}
+    ) == {"q": 1, "agent_id": "a", "context": "c"}
+    # A customer-shaped session_id value survives everywhere on this path.
+    theirs = {"q": 1, "session_id": "TICKET-9", "context": "c"}
+    assert await get_stripped_arguments(data, data.options, "t", theirs, None) == {
+        "q": 1,
+        "session_id": "TICKET-9",
+    }
 
 
 # ── resolve_call ─────────────────────────────────────────────────────────────

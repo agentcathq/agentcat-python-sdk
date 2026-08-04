@@ -1,6 +1,6 @@
 from typing import Any
 
-from agentcat.modules.hooks import await_hook_result
+from agentcat.modules.hooks import run_hook
 from agentcat.modules.logging import write_to_log
 from agentcat.types import AgentCatData, UserIdentity
 
@@ -25,9 +25,7 @@ async def resolve_identity(
         return None
 
     try:
-        result = await await_hook_result(
-            data.options.identify(request, extra), "identify"
-        )
+        result = await run_hook(data.options.identify, "identify", request, extra)
     except Exception as e:
         write_to_log(f"Error occurred during user identification: {e}")
         return None

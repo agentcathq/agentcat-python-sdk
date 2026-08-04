@@ -225,18 +225,37 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         """
         return state.get(f"orig_{method}")
 
-    def advertised_tools(result: Any, options: Any) -> list[Any] | None:
+    def advertised_tools(
+        result: Any, options: Any
+    ) -> tuple[list[Any], set[int]] | None:
         """Deep copies of the listed tools, plus get_more_tools when enabled.
 
         None when the handler returned something with no tool list to inject
         into (a raw dict, an error shape), which the caller serves untouched.
-        Copies because the injection pipeline rewrites schemas in place.
+        Copies because the injection pipeline rewrites schemas in place. A
+        tool whose copy fails is carried through VERBATIM — the customer's
+        original object, never handed to the pipeline so it is never mutated
+        — and its id() lands in the returned skip set so the callers exclude
+        it from injection; one uncopyable tool must not take down the whole
+        listing (or, on the rebuild path, brand the call's arguments).
         """
         nonlocal agentcat_advertises_get_more_tools
         listed = getattr(result, "tools", None)
         if not isinstance(listed, list):
             return None
-        tools = [tool.model_copy(deep=True) for tool in listed]
+        tools: list[Any] = []
+        skipped: set[int] = set()
+        for tool in listed:
+            try:
+                tools.append(tool.model_copy(deep=True))
+            except Exception as e:
+                write_to_log(
+                    "Warning: could not copy tool "
+                    f"'{getattr(tool, 'name', '<unnamed>')}' for injection; "
+                    f"serving it verbatim without handle parameters - {e}"
+                )
+                tools.append(tool)
+                skipped.add(id(tool))
         customer_owns_get_more_tools = any(
             getattr(tool, "name", None) == GET_MORE_TOOLS_NAME for tool in tools
         )
@@ -247,11 +266,16 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         # context pass skips it by name, so early placement cannot double-inject.
         if agentcat_advertises_get_more_tools:
             tools.append(_make_get_more_tools())
-        return tools
+        return tools, skipped
 
-    def specs_for(tools: list[Any]) -> list[ToolSpec]:
+    def specs_for(tools: list[Any], skipped: set[int]) -> list[ToolSpec | None]:
+        """Specs aligned index-for-index with `tools`; None for skipped ones."""
         return [
-            ToolSpec(tool.name, tool.input_schema, getattr(tool, "output_schema", None))
+            None
+            if id(tool) in skipped
+            else ToolSpec(
+                tool.name, tool.input_schema, getattr(tool, "output_schema", None)
+            )
             for tool in tools
         ]
 
@@ -261,11 +285,21 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         The registered params type is all-optional (``PaginatedRequestParams``),
         which is what the runner would hand a handler for a request that
         carried none — so a customer handler reading ``params.cursor`` sees the
-        same thing it always does.
+        same thing it always does. A bare-callable registration carries no
+        params_type; the real model is the fallback then, NOT None — a
+        customer list handler that dereferences its params must not crash the
+        rebuild (and with it, the call's argument strip).
         """
         params_type = getattr(_entry(server, LIST_METHOD), "params_type", None)
+        if params_type is None:
+            try:
+                from mcp.types import PaginatedRequestParams
+
+                return PaginatedRequestParams()
+            except Exception:
+                return None
         try:
-            return params_type() if params_type is not None else None
+            return params_type()
         except Exception:
             return None
 
@@ -273,12 +307,15 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         result = await original(LIST_METHOD)(ctx, params)
         tracking = current_data()
         try:
-            tools = advertised_tools(result, tracking.options)
-            if tools is None:
+            advertised = advertised_tools(result, tracking.options)
+            if advertised is None:
                 return result
-            specs = specs_for(tools)
+            tools, skipped = advertised
+            specs = specs_for(tools, skipped)
             injected = build_injected_schemas(
-                specs, tracking.options, tracking.reported_conflicts
+                [spec for spec in specs if spec is not None],
+                tracking.options,
+                tracking.reported_conflicts,
             )
             tracking.injected_params_registry = injected.injected_params
             tracking.output_injection_registry = injected.output_injected
@@ -287,6 +324,8 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
             # one did not see.
             tracking.declared_session_params |= injected.declared_session_params
             for tool, spec in zip(tools, specs, strict=True):
+                if spec is None:
+                    continue  # uncopyable tool: served verbatim, never mutated
                 tool.input_schema = spec.input_schema
                 if spec.output_schema is not None:
                     tool.output_schema = spec.output_schema
@@ -317,8 +356,11 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
             if list_handler is None:
                 return []
             listed = await list_handler(ctx, empty_list_params())
-            tools = advertised_tools(listed, current_data().options)
-            return specs_for(tools) if tools is not None else []
+            advertised = advertised_tools(listed, current_data().options)
+            if advertised is None:
+                return []
+            tools, skipped = advertised
+            return [spec for spec in specs_for(tools, skipped) if spec is not None]
 
         # Runs first: on an instance that never served a listing this rebuilds
         # the registries, which is also what settles whether the customer ships

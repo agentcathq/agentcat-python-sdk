@@ -3,10 +3,14 @@
 import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from importlib.metadata import version
 from typing import Any
 
-__version__ = version("agentcat")
+from .utils import get_agentcat_version
+
+# Guarded: on installs without distribution metadata (vendored source trees,
+# PYTHONPATH, PyInstaller bundles) the lookup fails — that must degrade the
+# version string, never crash the customer's import.
+__version__ = get_agentcat_version() or "0.0.0"
 
 from .modules.constants import AGENTCAT_CUSTOM_EVENT_TYPE
 from .modules.detection import Detection, ServerFlavor, detect_server

@@ -21,6 +21,8 @@ from agentcat.modules.injection import (
 )
 from agentcat.types import AgentCatOptions
 
+from .test_utils import sid
+
 
 def spec(name="t", props=None, extra=None, out=None):
     # props={} must mean "an empty properties bag", not "give me the default".
@@ -127,8 +129,25 @@ def test_strip_registry_driven_and_heuristic():
     # Registry present but tool not in it: it was never advertised through the
     # pipeline, so nothing was injected for it — strip nothing.
     assert strip_injected_arguments("unknown", args, reg) == args
-    assert strip_injected_arguments("t", args, None) == {"q": 1}
-    gmt = {"context": "real", "session_id": "s"}
+    # Registry unknown (rebuild failed): shape+config-aware. "s" is not a
+    # minted-shape handle, so it is presumed the CUSTOMER's parameter and
+    # spared; agent_id survives because agent tracking is off by default;
+    # only context — which default options would have injected — is stripped.
+    assert strip_injected_arguments("t", args, None) == {
+        "q": 1,
+        "session_id": "s",
+        "agent_id": "a",
+    }
+    # A minted-shape value IS stripped on the same degraded path...
+    minted_args = {"q": 1, "session_id": sid("mine"), "context": "c"}
+    assert strip_injected_arguments("t", minted_args, None) == {"q": 1}
+    # ...and agent_id joins only when the option that injects it is on.
+    tracking_on = AgentCatOptions(enable_agent_tracking=True)
+    assert strip_injected_arguments("t", args, None, tracking_on) == {
+        "q": 1,
+        "session_id": "s",
+    }
+    gmt = {"context": "real", "session_id": sid("theirs")}
     stripped = strip_injected_arguments(c.GET_MORE_TOOLS_NAME, gmt, None)
     assert stripped == {"context": "real"}
 
@@ -486,13 +505,30 @@ def test_injected_names_is_the_single_source_the_strip_reads():
     assert injected_parameter_names("t", reg) == frozenset({"session_id", "context"})
     # Registry present, tool absent: never advertised through the pipeline.
     assert injected_parameter_names("unknown", reg) == frozenset()
-    # No registry at all (rebuild failed): the heuristic, which the strip
-    # follows too — so the two stay consistent even on the degraded path.
+    # No registry at all (rebuild failed): the shape+config-aware fallback,
+    # which the strip follows too — so the two stay consistent even on the
+    # degraded path. With no arguments, session_id counts as ours (absence is
+    # the minting signal); agent_id needs its option on.
     assert injected_parameter_names("t", None) == frozenset(
-        {"session_id", "agent_id", "context"}
+        {"session_id", "context"}
     )
+    assert injected_parameter_names(
+        "t", None, options=AgentCatOptions(enable_agent_tracking=True)
+    ) == frozenset({"session_id", "agent_id", "context"})
+    # A non-minted-shape value flips session_id to "the customer's parameter".
+    assert injected_parameter_names(
+        "t", None, {"session_id": "TICKET-9"}
+    ) == frozenset({"context"})
+    # A minted-shape value keeps it ours.
+    assert injected_parameter_names(
+        "t", None, {"session_id": sid("mine")}
+    ) == frozenset({"session_id", "context"})
+    # A resolve_session_id hook never injects session_id, so it never strips it.
+    assert injected_parameter_names(
+        "t", None, options=AgentCatOptions(resolve_session_id=lambda req, extra: "x")
+    ) == frozenset({"context"})
     assert injected_parameter_names(c.GET_MORE_TOOLS_NAME, None) == frozenset(
-        {"session_id", "agent_id"}
+        {"session_id"}
     )
 
 
@@ -503,7 +539,7 @@ def test_injected_names_is_the_single_source_the_strip_reads():
 )
 def test_what_the_strip_removes_is_what_the_names_report(registry):
     args = {"session_id": "prod-42", "agent_id": "agt_1", "context": "why", "q": 1}
-    names = injected_parameter_names("deploy", registry)
+    names = injected_parameter_names("deploy", registry, args)
     stripped = strip_injected_arguments("deploy", args, registry)
     assert set(args) - set(stripped) == names & set(args)
 
@@ -517,8 +553,22 @@ def test_strip_always_returns_a_new_dict():
 
 
 def test_strip_heuristic_leaves_unrelated_arguments_alone():
+    # Non-minted session_id and default options: only context is ours to take.
     args = {"text": "x", "session_id": "a", "agent_id": "b", "context": "c", "id": 7}
-    assert strip_injected_arguments("any", args, None) == {"text": "x", "id": 7}
+    assert strip_injected_arguments("any", args, None) == {
+        "text": "x",
+        "session_id": "a",
+        "agent_id": "b",
+        "id": 7,
+    }
+    # Minted-shape session_id plus agent tracking on: the full strip, with the
+    # unrelated arguments still untouched.
+    minted = {"text": "x", "session_id": sid("m"), "agent_id": "b", "context": "c", "id": 7}
+    tracking_on = AgentCatOptions(enable_agent_tracking=True)
+    assert strip_injected_arguments("any", minted, None, tracking_on) == {
+        "text": "x",
+        "id": 7,
+    }
 
 
 def test_injection_result_equality_is_value_based():

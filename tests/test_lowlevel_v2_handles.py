@@ -1310,3 +1310,51 @@ def test_track_never_raises():
     server = create_lowlevel_todo_server()
     assert track(server, None) is server
     assert track(server, "proj_test", {"debug_mode": True}) is server
+
+
+async def test_an_uncopyable_tool_does_not_take_down_the_listing(log_sink):
+    """Audit finding 4c's sibling: one tool whose `model_copy(deep=True)`
+    raises (live runtime state in a schema) must not crash `tools/list` or
+    leave the whole listing un-injected. The stubborn tool serves verbatim,
+    un-injected and never mutated; every other tool still gets its handles."""
+
+    class UncopyableTool(types.Tool):
+        def model_copy(self, *args, **kwargs):
+            raise RuntimeError("live client handle in schema")
+
+    async def on_list_tools(ctx, params):
+        return types.ListToolsResult(
+            tools=[
+                types.Tool(
+                    name="good_tool",
+                    description="Copies fine.",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+                UncopyableTool(
+                    name="stubborn_tool",
+                    description="Cannot be copied.",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ]
+        )
+
+    async def on_call_tool(ctx, params):
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text="ok")]
+        )
+
+    server = Server(
+        "uncopyable", on_list_tools=on_list_tools, on_call_tool=on_call_tool
+    )
+    track(server, "proj_test", AgentCatOptions())
+
+    async with create_modern_client(server) as client:
+        listed = await client.list_tools()
+
+    names = {t.name for t in listed.tools}
+    assert {"good_tool", "stubborn_tool"} <= names
+    good = _tool(listed, "good_tool")
+    stubborn = _tool(listed, "stubborn_tool")
+    assert "session_id" in good.input_schema["properties"]
+    assert "session_id" not in (stubborn.input_schema.get("properties") or {})
+    assert any("could not copy tool" in line for line in log_sink)

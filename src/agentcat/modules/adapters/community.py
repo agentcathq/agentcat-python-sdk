@@ -256,22 +256,35 @@ class AgentCatMiddleware:
         except TypeError:
             return None
 
-    def _specs(self, tools: list[Any]) -> list[ToolSpec]:
+    def _specs(self, tools: list[Any]) -> list[ToolSpec | None]:
         """Copies of the listed schemas, ready for the in-place injection pass.
 
         Only the schema dicts are copied. Deep-copying the ``Tool`` itself
         raises on every tool holding live runtime state — an OpenAPI tool's
         ``httpx.AsyncClient`` carries a ``threading.RLock`` — which silently
-        dropped injection for whole servers in v1.
+        dropped injection for whole servers in v1. The same lesson applies
+        per tool: a schema dict whose copy fails yields ``None`` in the
+        aligned slot (that tool serves verbatim, un-injected) instead of
+        taking the whole listing down.
         """
-        return [
-            ToolSpec(
-                tool.name,
-                copy.deepcopy(getattr(tool, "parameters", None) or {}),
-                copy.deepcopy(_field(tool, "output_schema", "outputSchema")),
-            )
-            for tool in tools
-        ]
+        specs: list[ToolSpec | None] = []
+        for tool in tools:
+            try:
+                specs.append(
+                    ToolSpec(
+                        tool.name,
+                        copy.deepcopy(getattr(tool, "parameters", None) or {}),
+                        copy.deepcopy(_field(tool, "output_schema", "outputSchema")),
+                    )
+                )
+            except Exception as e:
+                write_to_log(
+                    "Warning: could not copy the schema of tool "
+                    f"'{getattr(tool, 'name', '<unnamed>')}' for injection; "
+                    f"serving it verbatim without handle parameters - {e}"
+                )
+                specs.append(None)
+        return specs
 
     # ── hooks ───────────────────────────────────────────────────────────────
 
@@ -313,7 +326,9 @@ class AgentCatMiddleware:
         try:
             specs = self._specs(tools)
             injected = build_injected_schemas(
-                specs, tracking.options, tracking.reported_conflicts
+                [spec for spec in specs if spec is not None],
+                tracking.options,
+                tracking.reported_conflicts,
             )
             tracking.injected_params_registry = injected.injected_params
             tracking.output_injection_registry = injected.output_injected
@@ -322,7 +337,9 @@ class AgentCatMiddleware:
             # one did not see.
             tracking.declared_session_params |= injected.declared_session_params
             return [
-                tool.model_copy(update=self._schema_update(spec))
+                tool
+                if spec is None  # uncopyable schema: served verbatim
+                else tool.model_copy(update=self._schema_update(spec))
                 for tool, spec in zip(tools, specs, strict=True)
             ]
         except Exception as e:
@@ -456,9 +473,10 @@ class AgentCatMiddleware:
             case install_community registers eagerly for.
             """
             listed = list(await self._server.list_tools(run_middleware=False))
-            return self._specs(
+            specs = self._specs(
                 await self._concede_get_more_tools(listed, authoritative=True)
             )
+            return [spec for spec in specs if spec is not None]
 
         stripped = await get_stripped_arguments(
             tracking, options, name, raw_arguments, rebuild
