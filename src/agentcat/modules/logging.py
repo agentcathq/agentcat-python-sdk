@@ -7,12 +7,15 @@ from datetime import datetime, timezone
 from agentcat.types import AgentCatOptions
 
 
-# Initialize debug_mode from environment variable at module load time
-_env_debug = os.getenv("AGENTCAT_DEBUG_MODE")
-if _env_debug is not None:
-    debug_mode = _env_debug.lower() in ("true", "1", "yes", "on")
-else:
-    debug_mode = False
+def _env_debug_mode() -> bool:
+    """True when AGENTCAT_DEBUG_MODE holds a truthy value."""
+    raw = os.getenv("AGENTCAT_DEBUG_MODE")
+    return raw is not None and raw.lower() in ("true", "1", "yes", "on")
+
+
+# Seed from the environment at import time. track() only overrides this when
+# AgentCatOptions.debug_mode is explicitly set — None leaves the seed alone.
+debug_mode = _env_debug_mode()
 
 
 # Optional sink that receives every (clean, newline-free) log entry. Used by the

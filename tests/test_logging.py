@@ -271,3 +271,33 @@ class TestLogging:
 
             # Verify message
             assert message == test_message, "Message content doesn't match"
+
+
+class TestEnvDebugMode:
+    """The AGENTCAT_DEBUG_MODE parse that seeds debug_mode at import time."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("true", True),
+            ("TRUE", True),
+            ("1", True),
+            ("yes", True),
+            ("on", True),
+            ("false", False),
+            ("0", False),
+            ("", False),
+            ("garbage", False),
+        ],
+    )
+    def test_parses_truthy_tokens(self, monkeypatch, raw, expected):
+        monkeypatch.setenv("AGENTCAT_DEBUG_MODE", raw)
+        from agentcat.modules.logging import _env_debug_mode
+
+        assert _env_debug_mode() is expected
+
+    def test_unset_means_off(self, monkeypatch):
+        monkeypatch.delenv("AGENTCAT_DEBUG_MODE", raising=False)
+        from agentcat.modules.logging import _env_debug_mode
+
+        assert _env_debug_mode() is False
