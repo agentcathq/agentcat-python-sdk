@@ -1,6 +1,7 @@
 """OpenTelemetry Protocol (OTLP) exporter for AgentCat telemetry."""
 
 import json
+import platform
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -9,7 +10,7 @@ import requests
 from ...types import Event, OTLPExporterConfig
 from ...modules.constants import AGENTCAT_SOURCE
 from ...modules.logging import write_to_log
-from ...modules.session import get_agentcat_version
+from ...utils import get_agentcat_version, get_dist_version
 from . import Exporter
 from .trace_context import trace_context
 
@@ -163,6 +164,28 @@ class OTLPExporter(Exporter):
                     "value": {"stringValue": event.agentcat_version},
                 }
             )
+
+        # Runtime + MCP SDK versions; keys mirror the diagnostics beacon
+        # (modules/diagnostics.py) so both OTLP surfaces share one vocabulary.
+        attributes.append(
+            {
+                "key": "process.runtime.name",
+                "value": {"stringValue": platform.python_implementation().lower()},
+            }
+        )
+        attributes.append(
+            {
+                "key": "process.runtime.version",
+                "value": {"stringValue": platform.python_version()},
+            }
+        )
+        for dist, key in (
+            ("mcp", "agentcat.mcp_sdk.version"),
+            ("fastmcp", "agentcat.fastmcp_sdk.version"),
+        ):
+            dist_version = get_dist_version(dist)
+            if dist_version:
+                attributes.append({"key": key, "value": {"stringValue": dist_version}})
 
         return attributes
 

@@ -1,9 +1,8 @@
 """Event-capture and round-trip tests over real Streamable HTTP.
 
-NOTE: mcp:initialize events are not captured under any transport because
-ServerSession handles initialize internally before user request handlers
-fire (see the skipped in-memory test_initialization_event_capture). All
-assertions in this file use post-initialize events instead.
+v2 publishes exactly one event type — mcp:tools/call. initialize is handled by
+ServerSession before any user handler fires, and tools/list is intercepted for
+schema injection only, so neither produces an event.
 """
 
 from __future__ import annotations
@@ -20,19 +19,19 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
-async def test_tools_list_event_captured(official_http_server, capture_queue):
-    """Real handshake + list_tools produces a mcp:tools/list event."""
+async def test_handshake_and_list_publish_nothing(official_http_server, capture_queue):
+    """A real handshake plus list_tools produces no events at all."""
     url, _server = official_http_server
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as client:
             await client.initialize()
-            await client.list_tools()
+            listed = await client.list_tools()
 
     time.sleep(0.5)
-    list_events = [e for e in capture_queue if e.event_type == "mcp:tools/list"]
-    assert list_events, (
-        f"expected mcp:tools/list, got {[e.event_type for e in capture_queue]}"
-    )
+    # The listing still went through AgentCat: the handles are on the schemas.
+    add = next(t for t in listed.tools if t.name == "add_todo")
+    assert "session_id" in add.inputSchema["properties"]
+    assert capture_queue == [], [e.event_type for e in capture_queue]
 
 
 @pytest.mark.asyncio

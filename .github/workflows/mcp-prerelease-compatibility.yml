@@ -11,58 +11,65 @@ on:
         required: false
         type: string
 
+# The prerelease CHANNELS this workflow watches — the generation after each
+# package's current stable line, which is where a breaking change lands first.
+#
+# The `a0` floors are load-bearing, not decoration. PEP 440 orders
+# `4.0.0b1 < 4.0.0`, so a bound of `>=4.0` excludes every 4.0.0 prerelease and
+# this workflow would find nothing while reporting success. `>=4.0.0a0` is the
+# lowest bound that admits the whole prerelease series.
+#
+# Discovery emits nothing once a stable release supersedes the channel (see
+# `discover_versions.py --pre`), and the jobs below are already gated on
+# `has-prereleases`, so a generation that ships simply stops being tested here
+# instead of pinning CI to a version that no longer matters. Move these floors
+# forward when the NEXT generation opens.
+env:
+  MCP_PRERELEASE_RANGE: ">=2.0.0a0,<3"
+  FASTMCP_PRERELEASE_RANGE: ">=4.0.0a0,<5"
+
 jobs:
   discover-mcp-prereleases:
     runs-on: ubuntu-latest
     outputs:
       mcp-prereleases: ${{ steps.get-mcp-prereleases.outputs.versions }}
-      has-prereleases: ${{ steps.get-mcp-prereleases.outputs.has-prereleases }}
+      has-prereleases: ${{ steps.get-mcp-prereleases.outputs.has-versions }}
 
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
     - name: Get available MCP prerelease versions
       id: get-mcp-prereleases
       run: |
-        # Get all available versions from PyPI including prereleases
-        all_versions=$(pip index versions mcp --pre 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+[ab][0-9]\+\|[0-9]\+\.[0-9]\+\.[0-9]\+rc[0-9]\+' | sort -V || echo "")
-
-        if [ -z "$all_versions" ]; then
-          echo "No MCP prereleases found"
-          echo "versions=[]" >> $GITHUB_OUTPUT
-          echo "has-prereleases=false" >> $GITHUB_OUTPUT
-        else
-          # Get only the latest prerelease
-          latest=$(echo "$all_versions" | tail -n 1)
-          json_array="[\"$latest\"]"
-          echo "Found MCP prerelease: $json_array"
-          echo "versions=$json_array" >> $GITHUB_OUTPUT
-          echo "has-prereleases=true" >> $GITHUB_OUTPUT
-        fi
+        python -m pip install --quiet --disable-pip-version-check packaging
+        python .github/scripts/discover_versions.py --pre \
+          mcp "$MCP_PRERELEASE_RANGE" >> "$GITHUB_OUTPUT"
 
   discover-fastmcp-prereleases:
     runs-on: ubuntu-latest
     outputs:
       fastmcp-prereleases: ${{ steps.get-fastmcp-prereleases.outputs.versions }}
-      has-prereleases: ${{ steps.get-fastmcp-prereleases.outputs.has-prereleases }}
+      has-prereleases: ${{ steps.get-fastmcp-prereleases.outputs.has-versions }}
 
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
     - name: Get available FastMCP prerelease versions
       id: get-fastmcp-prereleases
       run: |
-        # Get all available versions from PyPI including prereleases
-        all_versions=$(pip index versions fastmcp --pre 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+[ab][0-9]\+\|[0-9]\+\.[0-9]\+\.[0-9]\+rc[0-9]\+' | sort -V || echo "")
-
-        if [ -z "$all_versions" ]; then
-          echo "No FastMCP prereleases found"
-          echo "versions=[]" >> $GITHUB_OUTPUT
-          echo "has-prereleases=false" >> $GITHUB_OUTPUT
-        else
-          # Get only the latest prerelease
-          latest=$(echo "$all_versions" | tail -n 1)
-          json_array="[\"$latest\"]"
-          echo "Found FastMCP prerelease: $json_array"
-          echo "versions=$json_array" >> $GITHUB_OUTPUT
-          echo "has-prereleases=true" >> $GITHUB_OUTPUT
-        fi
+        python -m pip install --quiet --disable-pip-version-check packaging
+        python .github/scripts/discover_versions.py --pre \
+          fastmcp "$FASTMCP_PRERELEASE_RANGE" >> "$GITHUB_OUTPUT"
 
   test-fastmcp-prerelease:
     runs-on: ubuntu-latest
@@ -86,31 +93,41 @@ jobs:
       with:
         python-version: '3.12'
 
-    - name: Update pyproject.toml with prerelease FastMCP ${{ matrix.fastmcp-version }}
+    - name: Pin the community extra to FastMCP ${{ matrix.fastmcp-version }}
       run: |
-        # Update the community extras section with the specific FastMCP prerelease version
-        sed -i -E 's/"fastmcp[>=]+[^"]+"/\"fastmcp==${{ matrix.fastmcp-version }}\"/' pyproject.toml
+        # Address-scoped to one table each. Since Task 1 there are three
+        # `fastmcp` pins and three `mcp` pins in this file — the community
+        # extra plus the `mcp-legacy` / `mcp-modern` dependency groups — and an
+        # unscoped substitution rewrites all of them, leaving `fastmcp-slim`
+        # (4.x's runtime package, which the old pattern did not match) pinned
+        # to a generation the rewritten `fastmcp` no longer agrees with.
+        sed -i -E '/^community = \[/,/^\]/ s/"fastmcp[^"]*"/"fastmcp==${{ matrix.fastmcp-version }}"/' pyproject.toml
 
-        # Keep MCP flexible so FastMCP can choose its version
-        sed -i -E 's/"mcp[>=]+[^"]+"/\"mcp>=1.2.0\"/' pyproject.toml
+        # Widen the base `mcp` floor so the prerelease FastMCP picks whichever
+        # generation it needs; the `<3` ceiling stays.
+        sed -i -E '/^dependencies = \[/,/^\]/ s/"mcp[<>=!~][^"]*"/"mcp>=1.2.0,<3"/' pyproject.toml
 
-        # Show the updated dependencies for verification
-        echo "Updated dependencies:"
-        grep -A 5 "^dependencies = \[" pyproject.toml
+        echo "Updated [project] dependencies:"
+        sed -n '/^dependencies = \[/,/^\]/p' pyproject.toml
         echo ""
-        echo "Updated community extras:"
-        grep -A 2 "^\[project.optional-dependencies\]" pyproject.toml | grep -A 2 "community"
+        echo "Updated community extra:"
+        sed -n '/^community = \[/,/^\]/p' pyproject.toml
 
     - name: Install dependencies with prerelease FastMCP ${{ matrix.fastmcp-version }}
       run: |
-        # Install with both dev and community extras, allow prereleases.
-        # FastMCP will determine which MCP version it needs.
-        # Use --prerelease=allow (not if-necessary-or-explicit): FastMCP 3.4+
+        # `uv pip install`, NOT `uv sync`: syncing locks first, and locking is
+        # universal — it must satisfy every declared dependency group, so the
+        # committed `mcp-modern` pin collides with whatever this leg pinned and
+        # resolution fails before a single test runs. A pip-style install reads
+        # only `[project]` and its extras (PEP 735 groups are opt-in there).
+        #
+        # `--prerelease=allow`, not if-necessary-or-explicit: FastMCP 3.4+
         # splits into fastmcp + a transitive fastmcp-slim package. Pinning a
         # prerelease fastmcp pulls a matching prerelease fastmcp-slim that is
         # not named in our pyproject, so if-necessary-or-explicit refuses it
         # and resolution fails. "allow" is correct for a prerelease-testing job.
-        uv sync --extra dev --extra community --prerelease allow
+        uv venv --python 3.12
+        uv pip install -e ".[dev,community]" --prerelease allow
 
     - name: Show installed versions
       run: |
@@ -125,7 +142,9 @@ jobs:
       run: |
         echo "Running community FastMCP tests with prerelease version ${{ matrix.fastmcp-version }}"
         set -o pipefail
-        uv run pytest -v 2>&1 | tee pytest.log
+        # `--no-sync`: plain `uv run` re-resolves from the lockfile and would
+        # undo the pinned prerelease install above.
+        uv run --no-sync pytest -v 2>&1 | tee pytest.log
 
     - name: Collect failure details
       if: failure()
@@ -167,23 +186,18 @@ jobs:
 
     - name: Install dependencies with prerelease MCP ${{ matrix.mcp-version }} (no FastMCP)
       run: |
-        # Create virtual environment
-        uv venv
+        uv venv --python 3.12
 
-        # Install base dependencies first
-        uv pip install pydantic>=2.0.0 requests>=2.31.0 agentcat-api==1.0.0
+        # The project's own declared deps rather than a hand-copied list that
+        # goes stale whenever `[project] dependencies` moves. No `community`
+        # extra: this job proves agentcat works on official mcp alone.
+        uv pip install -e ".[dev]"
 
-        # Install the specific MCP prerelease version
+        # Then force the exact prerelease under test.
         uv pip install "mcp==${{ matrix.mcp-version }}" --prerelease=allow
 
-        # Install dev dependencies for testing
-        uv pip install pytest>=7.0.0 pytest-asyncio>=0.21.0 mypy>=1.0.0 ruff>=0.1.0 freezegun>=1.2.0
-
-        # Explicitly uninstall fastmcp if it somehow got installed
+        # Belt and braces: nothing above should pull fastmcp in.
         uv pip uninstall fastmcp -y 2>/dev/null || true
-
-        # Install the package itself in editable mode
-        uv pip install -e .
 
     - name: Verify FastMCP is not installed
       run: |
@@ -207,7 +221,9 @@ jobs:
         echo "Running tests with prerelease MCP version ${{ matrix.mcp-version }} (no FastMCP)"
         # Run all tests except community tests
         set -o pipefail
-        uv run pytest -v 2>&1 | tee pytest.log
+        # `--no-sync`: plain `uv run` re-resolves from the lockfile and would
+        # undo the pinned prerelease install above.
+        uv run --no-sync pytest -v 2>&1 | tee pytest.log
 
     - name: Collect failure details
       if: failure()

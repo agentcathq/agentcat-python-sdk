@@ -1,12 +1,15 @@
 """Internal data storage for AgentCat."""
 
-import inspect
 import weakref
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from ..types import EventType, AgentCatData, ToolRegistration, UnredactedEvent
-from .compatibility import is_official_fastmcp_server
+from ..types import AgentCatData, UnredactedEvent
+
+# The classifier's own presence probe, shared rather than copied — see
+# `_get_server_key`. detection.py imports nothing from this module, so this
+# does not close a cycle.
+from .detection import _probe as _attribute_present
+from .hooks import run_hook
 from .logging import write_to_log
 from .validation import validate_tags
 
@@ -15,15 +18,58 @@ _server_data_map: weakref.WeakKeyDictionary[Any, AgentCatData] = (
     weakref.WeakKeyDictionary()
 )
 
-# Global storage for original unpatched methods (keyed by tool_manager or handler id)
-# This is global because tool managers might be shared between servers
-_original_methods: Dict[str, Any] = {}
-
 
 def _get_server_key(server: Any) -> Any:
-    """Get the canonical key for a server (handles FastMCP vs low-level)."""
-    if is_official_fastmcp_server(server):
-        return server._mcp_server
+    """The object a server's tracking data is stored under.
+
+    ``track()`` installs the adapter on the LOWLEVEL server for both official
+    facades — an ``mcp.server.fastmcp.FastMCP``'s ``_mcp_server`` and an
+    ``MCPServer``'s ``_lowlevel_server`` — and stores the data there, so a
+    lookup holding the facade has to make the same hop. Without it,
+    ``publish_custom_event(mcpserver, ...)`` looked up an object nothing was
+    ever filed under and dropped the event as "not a tracked server".
+
+    Applies detection.py's ``OFFICIAL_FASTMCP_V1`` and ``MCPSERVER_V2`` rules
+    inline rather than calling ``detect_server``: this runs on every request,
+    and a 13-probe sweep to answer one question is not worth paying for. Both
+    rules are reproduced in full — class name, module prefix, a non-None inner
+    server, and a ``_tool_manager``. The ``_tool_manager`` half is also what
+    keeps a community FastMCP — which is tracked on ITSELF — out of both
+    branches.
+
+    The two probe strengths are the classifier's, not lookalikes, because the
+    difference decides where data lands. ``_tool_manager`` is a PRESENCE test
+    and reuses ``detection._probe`` itself: an attribute that exists but whose
+    lazy or proxy getter raises, or that holds ``None``, still means "this is a
+    facade". Reading it with ``getattr(..., None) is not None`` instead looked
+    like a harmless tightening and was not — it made this function classify a
+    facade the classifier calls ``MCPSERVER_V2`` as an ordinary server, so
+    ``track()`` filed the data under ``_lowlevel_server`` while every later
+    lookup keyed on the facade. That silent lost lookup is the exact bug this
+    function exists to prevent, so the predicate is shared rather than
+    re-spelled.
+
+    The inner server is a RETRIEVAL test, matching detection's ``_get``, and
+    ``is not None`` rather than truthiness: a facade whose ``_mcp_server``
+    defines ``__bool__`` or ``__len__`` falsily is still the object ``track()``
+    filed the data under.
+    """
+    try:
+        cls = type(server)
+        module = getattr(cls, "__module__", "")
+        is_official_fastmcp = "FastMCP" in getattr(
+            cls, "__name__", ""
+        ) and module.startswith("mcp.server.fastmcp")
+        has_tool_manager = _attribute_present(server, "_tool_manager")
+        if is_official_fastmcp and has_tool_manager:
+            mcp_server = getattr(server, "_mcp_server", None)
+            if mcp_server is not None:
+                return mcp_server
+        lowlevel = getattr(server, "_lowlevel_server", None)
+        if lowlevel is not None and has_tool_manager:
+            return lowlevel
+    except Exception:
+        pass
     return server
 
 
@@ -50,74 +96,7 @@ def reset_server_tracking_data(server: Any) -> None:
 def reset_all_tracking_data() -> None:
     """Reset all server tracking data (mainly for testing)."""
     _server_data_map.clear()
-    _original_methods.clear()
     write_to_log("Reset all server tracking data")
-
-
-
-# Dynamic tracking helper methods
-def register_tool(server: Any, name: str) -> None:
-    """Register a tool in the server's tracking system."""
-    data = get_server_tracking_data(server)
-    if data and name not in data.tool_registry:
-        data.tool_registry[name] = ToolRegistration(
-            name=name, registered_at=datetime.now(timezone.utc)
-        )
-        write_to_log(f"Registered tool '{name}'")
-
-
-def mark_tool_tracked(server: Any, name: str) -> None:
-    """Mark a tool as being tracked by AgentCat for this server."""
-    data = get_server_tracking_data(server)
-    if data and name in data.tool_registry:
-        data.tool_registry[name].tracked = True
-        data.tool_registry[name].wrapped = True
-        data.wrapped_tools.add(name)
-
-
-def is_tool_tracked(server: Any, name: str) -> bool:
-    """Check if a tool is already being tracked for this server."""
-    data = get_server_tracking_data(server)
-    return data and name in data.wrapped_tools
-
-
-def get_untracked_tools(server: Any) -> List[str]:
-    """Get list of tools that aren't tracked yet for this server."""
-    data = get_server_tracking_data(server)
-    if not data:
-        return []
-    return [name for name, reg in data.tool_registry.items() if not reg.tracked]
-
-
-def discover_new_tools(server: Any, tools: List[Any]) -> List[str]:
-    """Discover tools that weren't previously known for this server."""
-    data = get_server_tracking_data(server)
-    if not data:
-        return []
-
-    new_tools = []
-    for tool in tools:
-        if tool.name not in data.tool_registry:
-            register_tool(server, tool.name)
-            new_tools.append(tool.name)
-    return new_tools
-
-
-# Original methods storage (global, not per-server)
-def store_original_method(key: str, method: Any) -> None:
-    """Store an original unpatched method."""
-    if key not in _original_methods:
-        _original_methods[key] = method
-
-
-def get_original_method(key: str) -> Optional[Any]:
-    """Get an original unpatched method."""
-    return _original_methods.get(key)
-
-
-def get_original_methods() -> Dict[str, Any]:
-    """Get the global original methods storage."""
-    return _original_methods
 
 
 async def resolve_event_tags(
@@ -133,9 +112,7 @@ async def resolve_event_tags(
         return None
 
     try:
-        result = callback(request, extra)
-        if inspect.iscoroutine(result):
-            result = await result
+        result = await run_hook(callback, "event_tags", request, extra)
     except Exception as e:
         write_to_log(f"event_tags callback error: {e}")
         return None
@@ -159,9 +136,7 @@ async def resolve_event_properties(
         return None
 
     try:
-        result = callback(request, extra)
-        if inspect.iscoroutine(result):
-            result = await result
+        result = await run_hook(callback, "event_properties", request, extra)
     except Exception as e:
         write_to_log(f"event_properties callback error: {e}")
         return None
@@ -190,33 +165,3 @@ async def attach_event_metadata(
     properties = await resolve_event_properties(data, request, extra)
     if properties:
         event.properties = properties
-
-
-def get_tool_timeline(server: Any) -> List[Dict[str, Any]]:
-    """Get a timeline of tool registrations for debugging.
-
-    Args:
-        server: MCP server instance
-
-    Returns:
-        List of tool registration events sorted by time
-    """
-    data = get_server_tracking_data(server)
-    if not data:
-        return []
-    timeline = []
-
-    for name, reg in data.tool_registry.items():
-        timeline.append(
-            {
-                "name": name,
-                "registered_at": reg.registered_at.isoformat(),
-                "tracked": reg.tracked,
-                "wrapped": reg.wrapped,
-            }
-        )
-
-    # Sort by registration time
-    timeline.sort(key=lambda x: x["registered_at"])
-
-    return timeline

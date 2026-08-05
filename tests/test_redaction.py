@@ -309,14 +309,18 @@ class TestRedactEvent:
         assert result["metadata"]["timestamp"] == "[REDACTED]"
         assert result["metadata"]["ip"] == "[REDACTED]"
 
-    def test_identify_event_special_fields(self):
-        """Test agentcat:identify event with special protected fields."""
+    def test_actor_fields_are_never_redacted(self):
+        """The actor fields are protected wherever they ride.
+
+        v1 carried them on a standalone `agentcat:identify` event; v2 stamps
+        them onto every tools/call event. Either way redaction leaves them
+        alone, so the dashboard can still name the actor."""
 
         def redact_fn(s: str) -> str:
             return "XXX"
 
         identify_event = {
-            "event_type": "agentcat:identify",
+            "event_type": "mcp:tools/call",
             "identify_actor_given_id": "user123",  # Protected
             "identify_actor_name": "John Doe",  # Protected
             "identify_data": {  # Protected
@@ -367,3 +371,97 @@ class TestRedactEvent:
         # The function should propagate the error
         with pytest.raises(ValueError, match="Redaction error"):
             redact_event(event, faulty_redact_fn)
+
+
+class TestRedactEventOnTheRealEventModel:
+    """The shape the publish path actually holds.
+
+    `redact_strings_in_object` walks `str` / `list` / `dict` and returns
+    everything else untouched — and `event_queue._process_event` hands
+    `redact_event` a pydantic `UnredactedEvent`. For the whole of the v2 branch
+    that meant the documented `redact_sensitive_information` hook was a no-op on
+    every real event while the README advertised it as a security control. The
+    dict-shaped cases above never caught it; these are the ones that would.
+    """
+
+    @staticmethod
+    def _event(**overrides):
+        from agentcat.types import UnredactedEvent
+
+        fields = {
+            "session_id": "ses_keepme",
+            "id": "evt_keepme",
+            "project_id": "proj_keepme",
+            "event_type": "mcp:tools/call",
+            "resource_name": "add_todo",
+            "user_intent": "find the SECRET",
+            "parameters": {"arguments": {"text": "SECRET body"}},
+            "response": {"content": [{"type": "text", "text": "SECRET answer"}]},
+            "client_name": "SECRET client",
+            "identify_actor_given_id": "SECRET actor",
+            "identify_data": {"email": "SECRET@example.com"},
+            "tags": {"env": "SECRET tag"},
+            "duration": 12,
+        }
+        fields.update(overrides)
+        return UnredactedEvent(**fields)
+
+    def test_the_hook_actually_runs_on_a_pydantic_event(self):
+        def redact_fn(s: str) -> str:
+            return s.replace("SECRET", "[REDACTED]")
+
+        event = self._event()
+        result = redact_event(event, redact_fn)
+
+        assert result.user_intent == "find the [REDACTED]"
+        assert result.parameters == {"arguments": {"text": "[REDACTED] body"}}
+        assert result.response == {
+            "content": [{"type": "text", "text": "[REDACTED] answer"}]
+        }
+        assert result.client_name == "[REDACTED] client"
+        # ...and the original is untouched, so a failure downstream cannot
+        # publish a half-redacted object.
+        assert event.parameters == {"arguments": {"text": "SECRET body"}}
+
+    def test_protected_fields_survive_on_the_model_too(self):
+        def redact_fn(s: str) -> str:
+            return "XXX"
+
+        result = redact_event(self._event(), redact_fn)
+        assert result.session_id == "ses_keepme"
+        assert result.id == "evt_keepme"
+        assert result.project_id == "proj_keepme"
+        assert result.event_type == "mcp:tools/call"
+        assert result.resource_name == "add_todo"
+        assert result.identify_actor_given_id == "SECRET actor"
+        assert result.identify_data == {"email": "SECRET@example.com"}
+        assert result.tags == {"env": "SECRET tag"}
+
+    def test_the_result_is_still_a_publishable_event(self):
+        """`model_copy`, not a rebuild: unredacted fields keep their values and
+        non-string fields keep their types, so the queue can serialize it."""
+        result = redact_event(self._event(), lambda s: "XXX")
+        assert type(result) is type(self._event())
+        assert result.duration == 12
+        assert result.redaction_fn is None
+        assert "XXX" in result.model_dump_json()
+
+    def test_a_raising_hook_propagates_so_the_queue_drops_the_event(self):
+        def boom(_s: str) -> str:
+            raise RuntimeError("redaction exploded")
+
+        with pytest.raises(RuntimeError, match="redaction exploded"):
+            redact_event(self._event(), boom)
+
+    def test_an_async_hook_is_driven_to_completion(self):
+        """`RedactionFunction` permits an async hook and the publish path is a
+        worker thread with no loop. Un-awaited, every redacted string would
+        reach the wire as `<coroutine object ...>` — redaction that looks like
+        it worked."""
+
+        async def redact_fn(s: str) -> str:
+            return s.replace("SECRET", "[REDACTED]")
+
+        result = redact_event(self._event(), redact_fn)
+        assert result.client_name == "[REDACTED] client"
+        assert "coroutine" not in result.model_dump_json()

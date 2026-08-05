@@ -1,7 +1,7 @@
 [project]
 name = "agentcat"
-version = "1.0.2"
-description = "Analytics tool for MCP (Model Context Protocol) servers and AI agents - tracks tool usage patterns and provides insights"
+version = "2.0.0"
+description = "Analytics tool for MCP (Model Context Protocol) servers, Claude Connectors, and ChatGPT Plugins - tracks tool usage patterns and provides insights"
 authors = [
     { name = "AgentCat, Inc.", email = "support@agentcat.com" },
 ]
@@ -9,7 +9,7 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -18,9 +18,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<3",
     "agentcat-api==1.0.0",
-    "pydantic>=2.0.0,<2.12",
+    "pydantic>=2.0.0,<3",
     "requests>=2.31.0",
 ]
 
@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 community = [
-    "fastmcp>=2.7.0,!=2.9.*",
+    "fastmcp>=3.0.0,<5",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -117,6 +117,11 @@ exclude = [
     "dist",
 ]
 
+# The agent-facing copy in constants.py must stay byte-identical to the TS SDK
+# (tests/test_constants_copy.py), so its long literals cannot be wrapped.
+[tool.ruff.per-file-ignores]
+"src/agentcat/modules/constants.py" = ["E501"]
+
 [tool.ruff.isort]
 known-first-party = ["agentcat"]
 
@@ -126,3 +131,13 @@ dev = [
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.1.1",
 ]
+mcp-legacy = ["mcp>=1.2.0,<2", "fastmcp>=3.0.0,<4"]
+# fastmcp-slim is fastmcp 4's own runtime package; it is listed explicitly so
+# its prerelease is permitted under prerelease = "if-necessary-or-explicit"
+# (uv only honors prerelease markers on direct dependencies).
+mcp-modern = ["mcp>=2.0.0,<3", "fastmcp>=4.0.0b1,<5", "fastmcp-slim>=4.0.0b1,<5"]
+
+[tool.uv]
+conflicts = [[{ group = "mcp-legacy" }, { group = "mcp-modern" }]]
+default-groups = ["dev", "mcp-modern"]
+prerelease = "if-necessary-or-explicit"

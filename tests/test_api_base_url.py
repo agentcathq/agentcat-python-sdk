@@ -3,7 +3,11 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentcat.types import AgentCatOptions
+
+from .conftest import MCP_MAJOR
 
 
 class TestAgentCatOptionsApiBaseUrl:
@@ -60,67 +64,35 @@ class TestEventQueueConfigure:
         mock_configuration.assert_called_with(host=AGENTCAT_API_URL)
 
 
+@pytest.mark.skipif(
+    MCP_MAJOR >= 2,
+    reason="needs a server flavor track() can adapt; mcp 2.x lands in Task 12",
+)
 class TestTrackApiBaseUrl:
     """Test that track() wires api_base_url resolution correctly."""
 
-    # Common patches needed to isolate track() from real MCP server logic
-    TRACK_PATCHES = [
-        "agentcat.is_community_fastmcp_v3",
-        "agentcat.is_community_fastmcp_v2",
-        "agentcat.is_official_fastmcp_server",
-        "agentcat.is_compatible_server",
-        "agentcat._apply_server_tracking",
-        "agentcat.get_session_info",
-        "agentcat.set_server_tracking_data",
-    ]
-
     def _call_track_with_patches(self, options, env_vars=None):
-        """Helper to call track() with all internals mocked, returning a mock event_queue."""
+        """Run the real track() against a real server, with only the queue mocked.
+
+        A bare lowlevel `Server` has no tools/list or tools/call handler yet, so
+        the adapter installs nothing — but detection, data storage and the
+        api-base-url resolution all run exactly as they do in production.
+        """
+        from mcp.server.lowlevel import Server
+
         from agentcat import track
 
         mock_eq = MagicMock()
-        patches = {}
-        for p in self.TRACK_PATCHES:
-            patches[p] = patch(p)
-
-        eq_patch = patch("agentcat.modules.event_queue.event_queue", mock_eq)
-
-        started = []
-        try:
-            for name, p in patches.items():
-                m = p.start()
-                started.append(p)
-                if name == "agentcat.is_compatible_server":
-                    m.return_value = True
-                elif name in (
-                    "agentcat.is_community_fastmcp_v3",
-                    "agentcat.is_community_fastmcp_v2",
-                    "agentcat.is_official_fastmcp_server",
-                ):
-                    m.return_value = False
-                elif name == "agentcat.get_session_info":
-                    from agentcat.types import SessionInfo
-                    m.return_value = SessionInfo()
-
-            eq_patch.start()
-            started.append(eq_patch)
-
-            server = MagicMock()
-            if env_vars is not None:
-                with patch.dict(os.environ, env_vars, clear=True):
-                    track(server, project_id="proj-123", options=options)
-            else:
+        with patch("agentcat.modules.event_queue.event_queue", mock_eq):
+            server = Server("api-base-url-test")
+            if env_vars is None:
                 # Clear API URL env vars to avoid interference
-                env = os.environ.copy()
-                env.pop("AGENTCAT_API_URL", None)
-                env.pop("MCPCAT_API_URL", None)
-                with patch.dict(os.environ, env, clear=True):
-                    track(server, project_id="proj-123", options=options)
-
-            return mock_eq
-        finally:
-            for p in started:
-                p.stop()
+                env_vars = os.environ.copy()
+                env_vars.pop("AGENTCAT_API_URL", None)
+                env_vars.pop("MCPCAT_API_URL", None)
+            with patch.dict(os.environ, env_vars, clear=True):
+                track(server, project_id="proj-123", options=options)
+        return mock_eq
 
     def test_option_overrides_default(self):
         """api_base_url option should trigger configure() on event_queue."""

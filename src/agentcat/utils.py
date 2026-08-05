@@ -1,9 +1,40 @@
 """Utility functions for AgentCat."""
 
+import functools
 from typing import Optional
 from datetime import datetime, timezone
 
 from .thirdparty.ksuid import Ksuid, KsuidMs
+
+
+def get_agentcat_version() -> str | None:
+    """The installed AgentCat SDK version, or None if it cannot be read.
+
+    Lives here rather than in the package root so the event pipeline and the
+    telemetry exporters can stamp it without importing `agentcat` itself.
+    """
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version("agentcat")
+    except Exception:
+        return None
+
+
+@functools.cache
+def get_dist_version(name: str) -> str | None:
+    """Best-effort installed-distribution version; None when absent.
+
+    Shared by the log-line version suffix, the diagnostics beacon, and the
+    OTLP exporter to stamp the MCP SDK in use (`mcp` and/or `fastmcp`), so
+    the lookup runs once per distribution per process.
+    """
+    try:
+        import importlib.metadata
+
+        return importlib.metadata.version(name)
+    except Exception:
+        return None
 
 
 def generate_ksuid(

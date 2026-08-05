@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "officialsdk-factory": {
+      "type": "http",
+      "url": "http://localhost:8090/mcp"
+    },
+    "officialsdk-basic": {
+      "type": "http",
+      "url": "http://localhost:8091/mcp"
+    },
+    "officialsdk-advanced": {
+      "type": "http",
+      "url": "http://localhost:8092/mcp"
+    },
+    "officialsdk-legacy": {
+      "type": "http",
+      "url": "http://localhost:8093/mcp"
+    },
+    "fastmcp-basic": {
+      "type": "http",
+      "url": "http://localhost:8094/mcp"
+    },
+    "fastmcp-advanced": {
+      "type": "http",
+      "url": "http://localhost:8095/mcp"
+    },
+    "fastmcp-v3": {
+      "type": "http",
+      "url": "http://localhost:8096/mcp"
+    },
+    "agentcat-mcp": {
+      "type": "http",
+      "url": "https://mcp.agentcat.com/mcp"
+    }
+  }
+}

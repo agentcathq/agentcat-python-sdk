@@ -1,42 +1,39 @@
-from datetime import datetime, timezone
+from typing import Any
 
-from agentcat.modules import event_queue
-from agentcat.modules.internal import get_server_tracking_data
+from agentcat.modules.hooks import run_hook
 from agentcat.modules.logging import write_to_log
-from agentcat.types import EventType, UnredactedEvent, UserIdentity
+from agentcat.types import AgentCatData, UserIdentity
 
 
-def identify_session(server, request: any, context: any) -> UserIdentity | None:
-    """Run the configured identify hook and publish an `agentcat:identify` event.
+async def resolve_identity(
+    data: AgentCatData | None, request: Any, extra: Any
+) -> UserIdentity | None:
+    """Run the configured identify hook and return its UserIdentity.
 
-    Returns the resulting UserIdentity, or None if no hook is configured, the
-    hook raises, or it returns a non-UserIdentity value.
+    v1 published a standalone `agentcat:identify` event and cached the result
+    for the connection's lifetime. v2 publishes one event per tool call and
+    stamps the actor onto it, so identity resolution is pure and runs on every
+    call. Never raises — a customer hook that blows up yields an anonymous
+    call, not a failed one.
+
+    Async as of the sync-or-async sweep: the hook may be an `async def`, and
+    the await lives inside the same `try` as the call, so an awaitable that
+    fails degrades exactly like a hook that raised. Callers are unaffected —
+    the one call site (`callpath.resolve_call`) was already async.
     """
-    data = get_server_tracking_data(server)
-
     if not data or not data.options or not data.options.identify:
         return None
 
     try:
-        identify_result = data.options.identify(request, context)
-        if not identify_result or not isinstance(identify_result, UserIdentity):
-            write_to_log(
-                "User identification function did not return a valid UserIdentity "
-                f"instance. Received type: {type(identify_result).__name__}"
-            )
-            return None
-
-        event = UnredactedEvent(
-            session_id=data.session_id,
-            timestamp=datetime.now(timezone.utc),
-            event_type=EventType.AGENTCAT_IDENTIFY.value,
-            identify_actor_given_id=identify_result.user_id,
-            identify_actor_name=identify_result.user_name,
-            identify_data=identify_result.user_data or {},
-        )
-        event_queue.publish_event(server, event)
-
-        return identify_result
+        result = await run_hook(data.options.identify, "identify", request, extra)
     except Exception as e:
         write_to_log(f"Error occurred during user identification: {e}")
         return None
+
+    if not result or not isinstance(result, UserIdentity):
+        write_to_log(
+            "User identification function did not return a valid UserIdentity "
+            f"instance. Received type: {type(result).__name__}"
+        )
+        return None
+    return result

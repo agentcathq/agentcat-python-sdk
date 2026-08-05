@@ -70,11 +70,12 @@ class TestReportMissing:
                 {"context": "Need a tool to translate text between languages"},
             )
 
-            # Verify successful response
-            assert result.content
-            assert len(result.content) == 1
+            # Verify successful response. get_more_tools publishes events like
+            # any other tool, so it mints a task and carries the mint-back
+            # block after its own answer.
             assert result.content[0].type == "text"
             assert "Unfortunately" in result.content[0].text
+            assert "[MCP INSTRUCTIONS]: session_id issued." in result.content[-1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_valid_params(self):
@@ -110,11 +111,12 @@ class TestReportMissing:
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
-            # Test with missing context - should return a validation error
-            # since context is a required parameter
+            # `context` is required in the advertised schema, so a strict client
+            # will not send the call at all — but AgentCat never fails a tool
+            # call over its own analytics, so a lax client still gets an answer.
             result = await client.call_tool("get_more_tools", {})
-            assert result.content[0].text
-            assert result.isError is True
+            assert result.isError is False
+            assert "Unfortunately" in result.content[0].text
 
             # Test with valid context
             result = await client.call_tool("get_more_tools", {"context": "test_tool"})
@@ -212,11 +214,15 @@ class TestReportMissing:
             assert report_missing_tool is not None
             assert other_tool is not None
 
-            # Verify context is NOT added to report_missing tool
-            assert "context" in report_missing_tool.inputSchema.get("properties", {})
+            # get_more_tools keeps its own bespoke context, not the injected one
+            from agentcat.modules.constants import DEFAULT_CONTEXT_DESCRIPTION
 
-            # But context should be added to other tools
-            assert "context" in other_tool.inputSchema.get("properties", {})
+            gmt_context = report_missing_tool.inputSchema["properties"]["context"]
+            assert gmt_context["description"] != DEFAULT_CONTEXT_DESCRIPTION
+
+            # But the injected context is added to other tools
+            other_context = other_tool.inputSchema["properties"]["context"]
+            assert other_context["description"] == DEFAULT_CONTEXT_DESCRIPTION
 
     @pytest.mark.skip(
         reason="Creating empty low-level server is complex and already tested via FastMCP"
@@ -237,11 +243,11 @@ class TestReportMissing:
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
-            # Test with None context - should return a validation error
-            # since context is required as a string
+            # A null context is not an explanation, but it is not a reason to
+            # fail the call either.
             result = await client.call_tool("get_more_tools", {"context": None})
-            assert result.content[0].text
-            assert result.isError is True
+            assert result.isError is False
+            assert "Unfortunately" in result.content[0].text
 
     @pytest.mark.asyncio
     async def test_report_missing_publishes_event(self):
@@ -352,8 +358,8 @@ class TestReportMissing:
 
                 time.sleep(1.0)
 
-                # Should have at least 3 tool call events (plus initialize and list_tools events)
-                assert mock_api_client.publish_event.call_count >= 3
+                # v2 publishes exactly one event per tool call and nothing else.
+                assert mock_api_client.publish_event.call_count == 3
 
                 # Get all published events
                 events = [

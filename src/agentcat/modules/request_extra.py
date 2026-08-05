@@ -183,6 +183,21 @@ def extract_request_extra(
     return extra
 
 
+def extra_from_request_context(
+    request_context: Any,
+    fastmcp_context: Any | None = None,
+) -> dict[str, Any]:
+    """`{"extra": {...}}` ready to merge into an event's `parameters`, or `{}`.
+
+    The v2 adapters build `parameters` as `{"arguments": raw, **extra_params}`
+    rather than dumping the whole request, so this is the shape they need. The
+    key is omitted entirely when there is nothing to report (stdio), matching
+    `params_with_extra` and the TypeScript SDK.
+    """
+    extra = extract_request_extra(request_context, fastmcp_context)
+    return {"extra": extra} if extra else {}
+
+
 def params_with_extra(
     params_dump: dict | None,
     request_context: Any,

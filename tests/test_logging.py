@@ -1,5 +1,7 @@
 """Tests for the logging module."""
 
+import importlib.metadata
+import platform
 import time
 import uuid
 from unittest.mock import patch
@@ -269,5 +271,163 @@ class TestLogging:
             assert timestamp[13] == ":", "Invalid hour-minute separator"
             assert timestamp[16] == ":", "Invalid minute-second separator"
 
-            # Verify message
-            assert message == test_message, "Message content doesn't match"
+            # Verify message and version suffix:
+            # "MESSAGE | agentcat=… python=… mcp=… fastmcp=…"
+            message_part, suffix = message.rsplit(" | ", 1)
+            assert message_part == test_message, "Message content doesn't match"
+            for key in ("agentcat=", "python=", " mcp=", "fastmcp="):
+                assert key in f" {suffix}", f"Version suffix missing {key.strip()}"
+
+    def test_every_line_carries_version_suffix(self, tmp_path):
+        """Each entry — not just the first — carries the version suffix."""
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+        ):
+            write_to_log(f"first {unique_id}")
+            write_to_log(f"second {unique_id}")
+
+        test_lines = [
+            line
+            for line in log_file.read_text().strip().split("\n")
+            if unique_id in line
+        ]
+        assert len(test_lines) == 2
+        for line in test_lines:
+            for key in ("agentcat=", "python=", " mcp=", "fastmcp="):
+                assert key in line, f"{key.strip()} missing from line: {line}"
+
+    def test_version_suffix_values_are_truthful(self, tmp_path):
+        """The suffix reports the real installed/runtime versions."""
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser", return_value=str(log_file)
+        ):
+            write_to_log(f"versions {unique_id}")
+
+        content = log_file.read_text()
+        assert f"agentcat={importlib.metadata.version('agentcat')}" in content
+        assert f"python={platform.python_version()}" in content
+
+    def test_missing_distribution_reported_absent(self, tmp_path):
+        """A distribution that cannot be resolved shows as `absent`, not an error."""
+        from agentcat.modules.logging import _version_suffix
+
+        set_debug_mode(True)
+        unique_id = str(uuid.uuid4())
+        log_file = tmp_path / f"test_agentcat_{unique_id}.log"
+
+        _version_suffix.cache_clear()
+        try:
+            with (
+                patch("agentcat.utils.get_dist_version", return_value=None),
+                patch(
+                    "agentcat.modules.logging.os.path.expanduser",
+                    return_value=str(log_file),
+                ),
+            ):
+                write_to_log(f"absent {unique_id}")
+        finally:
+            _version_suffix.cache_clear()
+
+        content = log_file.read_text()
+        assert " mcp=absent" in content
+        assert " fastmcp=absent" in content
+
+
+class TestEnvDebugMode:
+    """The AGENTCAT_DEBUG_MODE parse that seeds debug_mode at import time."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("true", True),
+            ("TRUE", True),
+            ("1", True),
+            ("yes", True),
+            ("on", True),
+            ("false", False),
+            ("0", False),
+            ("", False),
+            ("garbage", False),
+        ],
+    )
+    def test_parses_truthy_tokens(self, monkeypatch, raw, expected):
+        monkeypatch.setenv("AGENTCAT_DEBUG_MODE", raw)
+        from agentcat.modules.logging import _env_debug_mode
+
+        assert _env_debug_mode() is expected
+
+    def test_unset_means_off(self, monkeypatch):
+        monkeypatch.delenv("AGENTCAT_DEBUG_MODE", raising=False)
+        from agentcat.modules.logging import _env_debug_mode
+
+        assert _env_debug_mode() is False
+
+
+class TestTrackDebugModePrecedence:
+    """track() must honor: explicit option > AGENTCAT_DEBUG_MODE seed > off."""
+
+    @pytest.fixture(autouse=True)
+    def reset_debug_mode(self):
+        yield
+        set_debug_mode(False)
+
+    def _track(self, tmp_path, **track_kwargs):
+        """Run track(object()) with ~/agentcat.log redirected to tmp_path.
+
+        The untrackable object takes the early no-project/no-exporters warning
+        path in _apply_tracking, which write_to_log's — enough to observe the
+        debug gate without touching the event queue.
+        """
+        import agentcat
+
+        log_file = tmp_path / "agentcat.log"
+        with patch(
+            "agentcat.modules.logging.os.path.expanduser",
+            return_value=str(log_file),
+        ):
+            agentcat.track(object(), **track_kwargs)
+        return log_file
+
+    def test_default_options_preserve_env_seeded_debug_mode(self, tmp_path):
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(True)  # simulate AGENTCAT_DEBUG_MODE=true import seed
+        log_file = self._track(tmp_path)
+
+        assert logging_module.debug_mode is True, (
+            "track() with default options clobbered the env-seeded debug flag"
+        )
+        assert log_file.exists(), "debug log was not written"
+        assert "Failed to track server" in log_file.read_text()
+
+    def test_explicit_true_enables_logging(self, tmp_path):
+        import agentcat
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(False)
+        log_file = self._track(
+            tmp_path, options=agentcat.AgentCatOptions(debug_mode=True)
+        )
+
+        assert logging_module.debug_mode is True
+        assert log_file.exists()
+
+    def test_explicit_false_overrides_env_seed(self, tmp_path):
+        import agentcat
+        from agentcat.modules import logging as logging_module
+
+        set_debug_mode(True)  # simulate env seed
+        log_file = self._track(
+            tmp_path, options=agentcat.AgentCatOptions(debug_mode=False)
+        )
+
+        assert logging_module.debug_mode is False
+        assert not log_file.exists()

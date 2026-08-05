@@ -1,7 +1,6 @@
 """Test event queue functionality."""
 
 import queue
-import signal
 import threading
 import time
 from datetime import datetime, timezone
@@ -9,14 +8,14 @@ from unittest.mock import MagicMock, call, patch
 
 from agentcat.modules.event_queue import EventQueue, publish_event
 from agentcat.modules.logging import write_to_log
-from agentcat.types import Event, AgentCatData, AgentCatOptions, SessionInfo, UnredactedEvent
+from agentcat.types import Event, AgentCatData, AgentCatOptions, UnredactedEvent
 
 
 class TestEventQueue:
     """Test EventQueue class."""
 
     def test_init(self):
-        """Test EventQueue initialization."""
+        """Test EventQueue initialization: construction starts no threads."""
         eq = EventQueue()
 
         assert isinstance(eq.queue, queue.Queue)
@@ -26,8 +25,33 @@ class TestEventQueue:
         assert eq.concurrency > 0
         assert eq._shutdown is False
         assert isinstance(eq._shutdown_event, threading.Event)
-        assert eq.worker_thread.is_alive()
-        assert eq.worker_thread.daemon is True
+        # Workers are lazy: nothing runs until the first add(), so importing
+        # the module (which constructs the global queue) is thread-safe.
+        assert eq._workers == []
+        assert eq._workers_started is False
+
+    def test_workers_start_lazily_and_are_daemon(self):
+        """First add() starts exactly `concurrency` daemon workers."""
+        eq = EventQueue()
+        eq._process_event = lambda event: None  # never hit the network
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+        )
+        eq.add(event)
+
+        assert eq._workers_started is True
+        assert len(eq._workers) == eq.concurrency
+        assert all(t.daemon for t in eq._workers)
+
+        eq.add(event)
+        assert len(eq._workers) == eq.concurrency  # no growth on later adds
+
+        eq.destroy()
 
     def test_add_event_success(self):
         """Test adding event to queue successfully."""
@@ -70,6 +94,7 @@ class TestEventQueue:
         """Test adding event when queue is full."""
         eq = EventQueue()
         eq.queue = queue.Queue(maxsize=2)  # Small queue for testing
+        eq._workers_started = True  # keep workers off so the queue stays full
 
         # Fill the queue
         event1 = UnredactedEvent(
@@ -114,6 +139,7 @@ class TestEventQueue:
         """Test that new events are dropped when queue is full."""
         eq = EventQueue()
         eq.queue = queue.Queue(maxsize=1)
+        eq._workers_started = True  # keep workers off so the queue stays full
 
         # Fill the queue
         event1 = UnredactedEvent(
@@ -189,6 +215,37 @@ class TestEventQueue:
             assert called_event.redaction_fn is None
             mock_send.assert_called_once()
 
+    def test_process_event_redacts_for_real(self):
+        """The same path with nothing mocked.
+
+        `test_process_event_with_redaction` above patches `redact_event`, so it
+        proves the queue calls it and nothing about what it does — which is how
+        a `redact_event` that returned its pydantic input untouched survived the
+        whole v2 branch with the README advertising it as a security control.
+        """
+        eq = EventQueue()
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            parameters={"arguments": {"token": "hunter2"}},
+            user_intent="spend hunter2",
+            redaction_fn=lambda s: s.replace("hunter2", "[REDACTED]"),
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+        sent = mock_send.call_args[0][0]
+        assert sent.parameters == {"arguments": {"token": "[REDACTED]"}}
+        assert sent.user_intent == "spend [REDACTED]"
+        assert sent.redaction_fn is None
+        # Protected: the handle still identifies the task on the dashboard.
+        assert sent.session_id == "session-123"
+
     @patch("agentcat.modules.event_queue.redact_event")
     @patch("agentcat.modules.event_queue.write_to_log")
     def test_process_event_redaction_failure(self, mock_log, mock_redact):
@@ -260,7 +317,8 @@ class TestEventQueue:
         eq._send_event(event)
 
         mock_api_client.publish_event.assert_called_once_with(
-            publish_event_request=event
+            publish_event_request=event,
+            _request_timeout=10,
         )
         assert mock_log.call_count >= 1  # At least one success log
 
@@ -433,12 +491,11 @@ class TestEventQueue:
         assert "isProcessing" in stats
         assert isinstance(stats["isProcessing"], bool)
 
-    @patch("time.sleep")
-    def test_destroy(self, mock_sleep):
-        """Test graceful shutdown."""
+    def test_destroy(self):
+        """destroy() sets flags, stops workers, and returns fast — no sleeps,
+        no unbounded joins."""
         eq = EventQueue()
-
-        # Add an event
+        eq._process_event = lambda event: None
         event = UnredactedEvent(
             id="test-id",
             event_type="mcp:tools/call",
@@ -446,26 +503,21 @@ class TestEventQueue:
             session_id="session-123",
             timestamp=datetime.now(timezone.utc),
         )
-        eq.queue.put_nowait(event)
+        eq.add(event)
 
-        # Mock executor
-        mock_executor = MagicMock()
-        eq.executor = mock_executor
-
+        start = time.monotonic()
         eq.destroy()
+        elapsed = time.monotonic() - start
 
         assert eq._shutdown is True
         assert eq._shutdown_event.is_set()
-        mock_executor.shutdown.assert_called_once()
+        assert elapsed < 1.5  # bounded by the shared 1s join budget
 
-    @patch("time.time")
-    @patch("time.sleep")
     @patch("agentcat.modules.event_queue.write_to_log")
-    def test_destroy_with_timeout(self, mock_log, mock_sleep, mock_time):
-        """Test destroy with events still in queue after timeout."""
+    def test_destroy_logs_unprocessed_events(self, mock_log):
+        """Events still queued when destroy() runs are counted in the log."""
         eq = EventQueue()
 
-        # Add events that won't be processed
         num_events = 5
         for i in range(num_events):
             event = UnredactedEvent(
@@ -475,19 +527,39 @@ class TestEventQueue:
                 session_id="session-123",
                 timestamp=datetime.now(timezone.utc),
             )
-            eq.queue.put_nowait(event)
-
-        # Mock time to simulate timeout
-        mock_time.side_effect = [0, 0.1, 0.2, 10.0]  # Exceeds timeout
-
-        # Mock executor
-        mock_executor = MagicMock()
-        eq.executor = mock_executor
+            eq.queue.put_nowait(event)  # no workers started: events sit there
 
         eq.destroy()
 
         assert mock_log.called
         assert any(str(num_events) in str(call) for call in mock_log.call_args_list)
+
+    @patch("agentcat.modules.event_queue.write_to_log")
+    def test_destroy_wakeup_markers_are_not_counted_as_events(self, mock_log):
+        """The _Stop markers destroy() enqueues to wake idle parked workers
+        must never show up in the unprocessed-events count."""
+        eq = EventQueue()
+        eq._process_event = lambda event: None
+        eq.add(
+            UnredactedEvent(
+                id="drains",
+                event_type="mcp:tools/call",
+                project_id="project-123",
+                session_id="session-123",
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if eq.queue.qsize() == 0 and eq.get_stats()["activeRequests"] == 0:
+                break
+            time.sleep(0.01)
+
+        eq.destroy()
+
+        assert not any(
+            "unprocessed" in str(logged) for logged in mock_log.call_args_list
+        )
 
     def test_worker_thread_processes_events(self):
         """Test that worker thread processes events from queue."""
@@ -521,85 +593,151 @@ class TestEventQueue:
 
     @patch("agentcat.modules.event_queue.write_to_log")
     def test_worker_thread_exception_handling(self, mock_log):
-        """Test worker thread handles exceptions gracefully."""
+        """A raising _process_event is logged and the workers stay alive."""
         eq = EventQueue()
+        eq._process_event = MagicMock(side_effect=Exception("Test exception"))
 
-        # Mock executor.submit to raise an exception
-        with patch.object(
-            eq.executor, "submit", side_effect=Exception("Test exception")
-        ):
-            # Add an event
-            event = UnredactedEvent(
-                id="test-id",
-                event_type="mcp:tools/call",
-                project_id="project-123",
-                session_id="session-123",
-                timestamp=datetime.now(timezone.utc),
-            )
-            eq.add(event)
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+        )
+        eq.add(event)
 
-            # Give worker thread time to process and handle exception
-            time.sleep(0.2)
+        # Give a worker time to pick it up and handle the exception
+        time.sleep(0.3)
 
-            # Check that error was logged
-            assert mock_log.called
-            assert any(
-                "Failed to submit event for processing" in str(call)
-                for call in mock_log.call_args_list
-            )
+        assert mock_log.called
+        assert any(
+            "Worker thread error (continuing)" in str(call)
+            for call in mock_log.call_args_list
+        )
+        assert all(t.is_alive() for t in eq._workers)
 
-            # Worker thread should still be alive
-            assert eq.worker_thread.is_alive()
+        eq.destroy()
+
+
+def _tracking_data(**overrides) -> AgentCatData:
+    """Track-time data in its v2 shape: project, options, server identity."""
+    fields = {
+        "project_id": "project-123",
+        "options": AgentCatOptions(),
+        "server_name": "test-server",
+        "server_version": "1.0.0",
+    }
+    fields.update(overrides)
+    return AgentCatData(**fields)
 
 
 class TestPublishEvent:
     """Test publish_event function."""
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_success(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_success(self, mock_eq, mock_tracking):
         """Test publishing event successfully."""
-        # Mock server and data
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(redact_sensitive_information=None),
+        mock_data = _tracking_data(
+            options=AgentCatOptions(redact_sensitive_information=None)
         )
         mock_tracking.return_value = mock_data
-
-        mock_session_info = SessionInfo(
-            server_name="test-server", server_version="1.0.0"
-        )
-        mock_session.return_value = mock_session_info
 
         # Create event
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
         publish_event(mock_server, event)
 
         mock_tracking.assert_called_once_with(mock_server)
-        mock_session.assert_called_once_with(mock_server, mock_data)
-        mock_set_activity.assert_called_once_with(mock_server)
 
-        # Check event was added with merged data
         mock_eq.add.assert_called_once()
         added_event = mock_eq.add.call_args[0][0]
         assert added_event.project_id == mock_data.project_id
-        # Just verify the event has the expected type and required fields
         assert isinstance(added_event, UnredactedEvent)
         assert added_event.event_type == "mcp:tools/call"
-        assert added_event.session_id is not None
+        assert added_event.session_id == "ses_task_handle"
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_stamps_server_and_sdk_metadata(self, mock_eq, mock_tracking):
+        """Server identity comes from the track-time capture on AgentCatData and
+        the SDK identity from package metadata — there is no session cache to
+        read them from anymore, but every event still carries all four."""
+        import importlib.metadata
+
+        mock_tracking.return_value = _tracking_data(
+            server_name="todo-server", server_version="4.2.0"
+        )
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.server_name == "todo-server"
+        assert added_event.server_version == "4.2.0"
+        assert added_event.sdk_language.startswith("Python ")
+        # Compared against the distribution directly, not against the helper the
+        # pipeline calls, so this cannot pass by agreeing with itself.
+        assert added_event.agentcat_version == importlib.metadata.version("agentcat")
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_keeps_the_events_own_client_identity(
+        self, mock_eq, mock_tracking
+    ):
+        """The per-request client identity ladder (design §7) already stamped
+        this event. Publishing must not overwrite it — the v1 pipeline merged a
+        server-wide session cache OVER the event and defeated the ladder on
+        every non-stateless server."""
+        mock_tracking.return_value = _tracking_data()
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+            client_name="Cursor",
+            client_version="2.6.22",
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.client_name == "Cursor"
+        assert added_event.client_version == "2.6.22"
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_keeps_the_events_own_actor_and_tags(
+        self, mock_eq, mock_tracking
+    ):
+        """Same rule for everything else the call path resolved per request:
+        the actor `identify` returned and the tags the handle layer merged."""
+        mock_tracking.return_value = _tracking_data()
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+            identify_actor_given_id="user-123",
+            identify_actor_name="Ada",
+            identify_data={"plan": "pro"},
+            tags={"agentcat_session_id_source": "supplied"},
+        )
+        publish_event(MagicMock(), event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.identify_actor_given_id == "user-123"
+        assert added_event.identify_actor_name == "Ada"
+        assert added_event.identify_data == {"plan": "pro"}
+        assert added_event.tags == {"agentcat_session_id_source": "supplied"}
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
     @patch("agentcat.modules.event_queue.write_to_log")
@@ -610,7 +748,7 @@ class TestPublishEvent:
 
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -622,29 +760,17 @@ class TestPublishEvent:
         )
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_calculates_duration(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_calculates_duration(self, mock_eq, mock_tracking):
         """Test publishing event calculates duration if not provided."""
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(),
-        )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
+        mock_tracking.return_value = _tracking_data()
 
         # Create event without duration
         event_timestamp = datetime.now(timezone.utc)
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=event_timestamp,
         )
 
@@ -661,26 +787,16 @@ class TestPublishEvent:
             assert event.duration > 0
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_no_duration_no_timestamp(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_no_duration_no_timestamp(self, mock_eq, mock_tracking):
         """Test publishing event with no duration and no timestamp sets duration to None."""
         mock_server = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(),
-        )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
+        mock_tracking.return_value = _tracking_data()
 
         # Create event without duration or timestamp
-        event = UnredactedEvent(event_type="mcp:tools/call", session_id="session-123")
+        event = UnredactedEvent(
+            event_type="mcp:tools/call", session_id="ses_task_handle"
+        )
 
         publish_event(mock_server, event)
 
@@ -688,28 +804,18 @@ class TestPublishEvent:
         assert event.duration is None
 
     @patch("agentcat.modules.event_queue.get_server_tracking_data")
-    @patch("agentcat.modules.event_queue.get_session_info")
-    @patch("agentcat.modules.event_queue.set_last_activity")
     @patch("agentcat.modules.event_queue.event_queue")
-    def test_publish_event_with_redaction_function(
-        self, mock_eq, mock_set_activity, mock_session, mock_tracking
-    ):
+    def test_publish_event_with_redaction_function(self, mock_eq, mock_tracking):
         """Test publishing event includes redaction function from options."""
         mock_server = MagicMock()
         mock_redaction_fn = MagicMock()
-        mock_data = AgentCatData(
-            project_id="project-123",
-            session_id="session-123",
-            session_info=SessionInfo(),
-            last_activity=datetime.now(timezone.utc),
-            options=AgentCatOptions(redact_sensitive_information=mock_redaction_fn),
+        mock_tracking.return_value = _tracking_data(
+            options=AgentCatOptions(redact_sensitive_information=mock_redaction_fn)
         )
-        mock_tracking.return_value = mock_data
-        mock_session.return_value = SessionInfo()
 
         event = UnredactedEvent(
             event_type="mcp:tools/call",
-            session_id="session-123",
+            session_id="ses_task_handle",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -720,69 +826,62 @@ class TestPublishEvent:
         assert added_event.redaction_fn == mock_redaction_fn
 
 
-@patch("agentcat.modules.event_queue.signal.signal")
-@patch("agentcat.modules.event_queue.atexit.register")
-def test_shutdown_handlers_registered(mock_atexit, mock_signal):
-    """Test that shutdown handlers are registered on module import."""
-    # Import the module to trigger registration
-    import importlib
-    import agentcat.modules.event_queue
+def test_module_import_installs_no_process_hooks():
+    """The SDK must never register signal handlers — the customer's process
+    owns its own shutdown. The one exit hook this module owns registers on
+    first publish, never at import. (Full subprocess-based checks live in
+    test_process_safety.py; this pins the module surface.)"""
+    import agentcat.modules.event_queue as eq_module
 
-    importlib.reload(agentcat.modules.event_queue)
-
-    # Check signal handlers registered
-    assert mock_signal.call_count >= 2
-    signal_calls = mock_signal.call_args_list
-    registered_signals = [call[0][0] for call in signal_calls]
-    assert signal.SIGINT in registered_signals
-    assert signal.SIGTERM in registered_signals
-
-    # Check atexit handler registered
-    assert mock_atexit.called
+    assert not hasattr(eq_module, "_shutdown_handler")
+    source = open(eq_module.__file__).read()
+    assert "import signal" not in source
+    assert "signal.signal" not in source
+    assert "os._exit" not in source
 
 
-@patch("os._exit")
-@patch("agentcat.modules.event_queue.signal.signal")
-@patch("agentcat.modules.event_queue.event_queue")
-def test_shutdown_handler_function(mock_event_queue, mock_signal, mock_exit):
-    """Test the _shutdown_handler function."""
-    from agentcat.modules.event_queue import _shutdown_handler
-
-    # Call the shutdown handler with proper signal handler arguments
-    _shutdown_handler(signal.SIGINT, None)
-
-    # Verify signal handlers are reset to default
-    mock_signal.assert_any_call(signal.SIGINT, signal.SIG_DFL)
-    mock_signal.assert_any_call(signal.SIGTERM, signal.SIG_DFL)
-
-    # Verify it calls destroy on the event queue
-    mock_event_queue.destroy.assert_called_once()
-
-    # Verify it exits with code 0
-    mock_exit.assert_called_once_with(0)
-
-
-@patch("time.sleep")
-def test_destroy_cancels_pending_futures(mock_sleep):
-    """Test destroy method cancels pending futures."""
+def test_bounded_queue_is_the_only_buffer():
+    """Audit finding 9: with every worker wedged, memory is capped by the
+    queue's maxsize — there is no second, unbounded buffer behind it (the old
+    dispatcher drained the bounded queue into ThreadPoolExecutor's unbounded
+    SimpleQueue, so the advertised cap protected nothing)."""
     eq = EventQueue()
+    eq.queue = queue.Queue(maxsize=5)
+    wedge = threading.Event()
+    eq._process_event = lambda event: wedge.wait(10)
 
-    # Add an event
-    event = UnredactedEvent(
-        id="test-id",
-        event_type="mcp:tools/call",
-        project_id="project-123",
-        session_id="session-123",
-        timestamp=datetime.now(timezone.utc),
-    )
-    eq.queue.put_nowait(event)
+    def make(i: int) -> UnredactedEvent:
+        return UnredactedEvent(
+            id=f"e{i}",
+            event_type="mcp:tools/call",
+            project_id="p",
+            session_id="s",
+            timestamp=datetime.now(timezone.utc),
+        )
 
-    # Mock executor
-    mock_executor = MagicMock()
-    eq.executor = mock_executor
+    try:
+        with patch("agentcat.modules.event_queue.write_to_log") as mock_log:
+            for i in range(30):
+                eq.add(make(i))
+            deadline = time.monotonic() + 2.0
+            while (
+                eq.get_stats()["activeRequests"] < eq.concurrency
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.02)
 
-    eq.destroy()
+        # concurrency in flight + maxsize buffered is the whole footprint;
+        # every other event was dropped at add() with a log line.
+        assert eq.queue.qsize() <= 5
+        assert len(eq._workers) == eq.concurrency
+        assert all(t.daemon for t in eq._workers)
 
-    assert eq._shutdown is True
-    assert eq._shutdown_event.is_set()
-    mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
+        stats = eq.get_stats()
+        assert stats["activeRequests"] == eq.concurrency
+        assert stats["isProcessing"] is True
+        assert any(
+            "full" in str(c).lower() for c in mock_log.call_args_list
+        ), "no drop was logged"
+    finally:
+        wedge.set()
+        eq.destroy()

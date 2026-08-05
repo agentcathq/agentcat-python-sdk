@@ -35,7 +35,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -73,6 +73,10 @@ class TestEventCaptureCompleteness:
         assert event.parameters is not None
         assert event.parameters.get("arguments") == {"text": "Test todo"}
 
+        # session_id now carries the task handle, minted on this first call.
+        assert event.session_id.startswith("ses_")
+        assert event.tags["agentcat_session_id_source"] == "minted"
+
         # Verify event has its own ID
         assert event.id is not None
         assert event.id.startswith("evt_")
@@ -84,7 +88,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -117,7 +121,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -148,7 +152,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -180,7 +184,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -214,7 +218,7 @@ class TestEventCaptureCompleteness:
             == "User wants to add a reminder to buy groceries for dinner"
         )
 
-        # Context should be stripped from arguments
+        # The event records the call as the agent made it: raw, unstripped.
         assert event.parameters["arguments"] == {
             "text": "Buy groceries",
             "context": "User wants to add a reminder to buy groceries for dinner",
@@ -226,7 +230,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -263,12 +267,12 @@ class TestEventCaptureCompleteness:
             }
 
     @pytest.mark.asyncio
-    async def test_multiple_event_types_capture_all_fields(self):
-        """Test that different event types all capture required fields."""
+    async def test_only_tool_call_events_are_published(self):
+        """Only mcp:tools/call events exist in v2, and each is fully stamped."""
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -281,14 +285,15 @@ class TestEventCaptureCompleteness:
         track(server, "test_project", options)
 
         async with create_test_client(server) as client:
-            # Generate various event types
-            await client.list_tools()  # mcp:tools/list
-            await client.call_tool("add_todo", {"text": "Test"})  # mcp:tools/call
-            await client.call_tool("list_todos")  # Another tool call
+            # tools/list is intercepted for schema injection only; v2 publishes
+            # no event for it, and none for initialize or identify either.
+            await client.list_tools()
+            await client.call_tool("add_todo", {"text": "Test"})
+            await client.call_tool("list_todos")
             time.sleep(1.0)
 
-        # Check all captured events
-        assert len(captured_events) >= 3
+        assert {e.event_type for e in captured_events} == {"mcp:tools/call"}
+        assert len(captured_events) == 2
 
         # Verify each event has all required fields
         for event in captured_events:
@@ -313,7 +318,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -334,6 +339,10 @@ class TestEventCaptureCompleteness:
         # Extract all event IDs
         event_ids = [e.id for e in captured_events]
 
+        # Five calls, five events. Without this the uniqueness check below is
+        # `0 == 0` on an empty list and the format loop never runs.
+        assert len(event_ids) == 5
+
         # All IDs should be unique
         assert len(event_ids) == len(set(event_ids)), "Event IDs are not unique"
 
@@ -348,7 +357,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -376,54 +385,13 @@ class TestEventCaptureCompleteness:
         assert event.duration >= 0  # Should be non-negative
         assert event.duration < 10000  # Should be less than 10 seconds
 
-    @pytest.mark.skip(reason="Initialization event tracking is not implemented")
-    @pytest.mark.asyncio
-    async def test_initialization_event_capture(self):
-        """Test that initialization events are captured with all fields."""
-        mock_api_client = MagicMock()
-        captured_events = []
-
-        def capture_event(publish_event_request):
-            captured_events.append(publish_event_request)
-
-        mock_api_client.publish_event = MagicMock(side_effect=capture_event)
-
-        test_queue = EventQueue(api_client=mock_api_client)
-        set_event_queue(test_queue)
-
-        server = create_todo_server()
-        options = AgentCatOptions(enable_tracing=True)
-        track(server, "test_project", options)
-
-        # Creating the client triggers initialization
-        async with create_test_client(server) as client:
-            # Just need to wait for events to be processed
-            time.sleep(1.0)
-
-        # Find initialization event
-        init_events = [e for e in captured_events if e.event_type == "mcp:initialize"]
-        assert len(init_events) > 0
-
-        event = init_events[0]
-
-        # Verify all fields are present
-        assert event.project_id == "test_project"
-        assert event.id is not None
-        assert event.timestamp is not None
-        assert event.server_name == "todo-server"
-        assert event.server_version == "1.0.0"
-        assert event.client_name == "test-client"
-        assert event.client_version == "1.0.0"
-        assert event.sdk_language is not None
-        assert event.agentcat_version is not None
-
     @pytest.mark.asyncio
     async def test_identify_function_integration(self):
         """Test that custom identify function affects event actor info."""
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)
@@ -433,8 +401,9 @@ class TestEventCaptureCompleteness:
 
         # Custom identify function
         def custom_identify(request, server):
-            # Extract user info from tool arguments
-            arguments = request.params.arguments
+            # Extract user info from tool arguments. v2 hands every hook the
+            # request PARAMS, so `.arguments` is one hop, not two.
+            arguments = request.arguments
             if "user_id" in arguments:
                 return UserIdentity(
                     user_id=arguments["user_id"],
@@ -475,7 +444,7 @@ class TestEventCaptureCompleteness:
         mock_api_client = MagicMock()
         captured_events = []
 
-        def capture_event(publish_event_request):
+        def capture_event(publish_event_request, **kwargs):
             captured_events.append(publish_event_request)
 
         mock_api_client.publish_event = MagicMock(side_effect=capture_event)

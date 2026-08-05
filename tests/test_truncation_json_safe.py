@@ -16,12 +16,12 @@ from agentcat.types import UnredactedEvent
 
 
 def _poison_response():
-    # Mirrors what tool.model_dump() embeds for FastMCP v3 tools: a callable and a set.
+    # Mirrors what a FastMCP v3 tool's model_dump() embeds: a callable and a set.
     return {"tools": [{"name": "t", "fn": (lambda: 1), "tags": {"a", "b"}}]}
 
 
 def test_truncate_event_does_not_log_failure_on_callable_and_set():
-    event = UnredactedEvent(event_type="mcp:tools/list", response=_poison_response())
+    event = UnredactedEvent(event_type="mcp:tools/call", response=_poison_response())
     with patch.object(truncation, "write_to_log") as mock_log:
         result = truncate_event(event)
     failures = [
@@ -35,7 +35,7 @@ def test_truncate_event_does_not_log_failure_on_callable_and_set():
 
 def test_truncated_event_is_json_serializable():
     """After truncation the event's payload must contain only JSON-safe primitives."""
-    event = UnredactedEvent(event_type="mcp:tools/list", response=_poison_response())
+    event = UnredactedEvent(event_type="mcp:tools/call", response=_poison_response())
     result = truncate_event(event)
     # The event the API client re-serializes on send must not carry a callable/set.
     json.dumps(result.response)  # would raise if a set/function survived

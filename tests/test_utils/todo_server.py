@@ -1,14 +1,23 @@
-"""Todo server implementation for testing."""
+"""Todo server implementation for testing (official MCP SDK 1.x).
 
-from mcp.shared.exceptions import McpError
-from mcp.types import ErrorData
+Import-safe under mcp 2.x, which removed `FastMCP` and renamed `McpError`, so
+a module that mixes era-agnostic unit tests with a `create_todo_server()`
+integration class can still be collected there — the factory raises, the unit
+tests run. `test_utils.modern_server` is the 2.x counterpart.
+"""
+
+from tests.test_utils.delivery import attach_delivery_recorder
 
 try:
     from mcp.server import FastMCP
+    from mcp.shared.exceptions import McpError
+    from mcp.types import ErrorData
 
     HAS_FASTMCP = True
-except ImportError:
+except ImportError:  # mcp 2.x
     FastMCP = None
+    McpError = None
+    ErrorData = None
     HAS_FASTMCP = False
 
 
@@ -32,7 +41,16 @@ class Todo:
 
 
 def create_todo_server():
-    """Create a todo server for testing."""
+    """Create a todo server for testing.
+
+    Every tool body here is a typed function, so none of them can police its
+    own arguments: measured on mcp 1.29, `mcp.server.fastmcp`'s tool manager
+    DROPS an undeclared argument silently rather than failing the call. A test
+    that sends AgentCat's injected parameters and asserts "no error" therefore
+    proves nothing about the strip. The delivery recorder installed below is
+    what makes it observable — read it with
+    `tests.test_utils.delivery.delivered_arguments_for(server, "add_todo")`.
+    """
     if FastMCP is None:
         raise ImportError(
             "FastMCP is not available in this MCP version. Use create_low_level_todo_server() instead."
@@ -91,6 +109,8 @@ def create_todo_server():
         """A tool that returns an MCP protocol error."""
         error = ErrorData(code=INVALID_PARAMS, message="Invalid parameters")
         raise McpError(error)
+
+    attach_delivery_recorder(server, server._tool_manager)
 
     # Store original handlers for testing
     server._original_handlers = {

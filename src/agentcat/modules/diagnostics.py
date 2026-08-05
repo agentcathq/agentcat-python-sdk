@@ -167,6 +167,10 @@ def _build_static_attributes(project_id: str | None) -> list[dict[str, Any]]:
             out += _attr("agentcat.mcp_sdk.version", version("mcp"))
         except Exception:
             pass
+        try:
+            out += _attr("agentcat.fastmcp_sdk.version", version("fastmcp"))
+        except Exception:
+            pass
 
         # Runtime
         out += _attr("process.runtime.name", platform.python_implementation().lower())
@@ -230,7 +234,7 @@ def capture(entry: str) -> None:
         pass
 
 
-def flush_diagnostics() -> None:
+def flush_diagnostics(timeout: float = 5.0) -> None:
     """Swap out the buffer and POST it fire-and-forget. Never raises."""
     try:
         if not _enabled:
@@ -263,7 +267,9 @@ def flush_diagnostics() -> None:
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
-        requests.post(_resolve_endpoint(), json=payload, headers=headers, timeout=5)
+        requests.post(
+            _resolve_endpoint(), json=payload, headers=headers, timeout=timeout
+        )
     except Exception:
         # fire-and-forget: never propagate diagnostics network errors
         pass
@@ -325,5 +331,20 @@ def _build_record_for_test(entry: str) -> dict[str, Any]:
     return _build_record(entry)
 
 
+def _flush_at_exit() -> None:
+    """Exit-time flush, hard-bounded so the customer's shutdown is never held
+    up: skip without even taking the lock when there is nothing buffered, and
+    cap the POST at 2s (requests applies the timeout per phase — connect,
+    then between bytes — so this approximates, not guarantees, 2s wall clock).
+    This is the only atexit hook the SDK registers.
+    """
+    try:
+        if not _enabled or not _buffer:
+            return
+        flush_diagnostics(timeout=2.0)
+    except Exception:
+        pass
+
+
 # Flush whatever is buffered on interpreter exit (covers non-destroy() paths).
-atexit.register(flush_diagnostics)
+atexit.register(_flush_at_exit)
