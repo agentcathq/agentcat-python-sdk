@@ -1,7 +1,7 @@
 [project]
 name = "agentcat"
 version = "2.0.0"
-description = "Analytics tool for MCP (Model Context Protocol) servers and AI agents - tracks tool usage patterns and provides insights"
+description = "Analytics tool for MCP (Model Context Protocol) servers, Claude Connectors, and ChatGPT Plugins - tracks tool usage patterns and provides insights"
 authors = [
     { name = "AgentCat, Inc.", email = "support@agentcat.com" },
 ]
