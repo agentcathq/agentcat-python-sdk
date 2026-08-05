@@ -828,7 +828,8 @@ class TestPublishEvent:
 
 def test_module_import_installs_no_process_hooks():
     """The SDK must never register signal handlers — the customer's process
-    owns its own shutdown. (Full subprocess-based checks live in
+    owns its own shutdown. The one exit hook this module owns registers on
+    first publish, never at import. (Full subprocess-based checks live in
     test_process_safety.py; this pins the module surface.)"""
     import agentcat.modules.event_queue as eq_module
 
@@ -837,8 +838,6 @@ def test_module_import_installs_no_process_hooks():
     assert "import signal" not in source
     assert "signal.signal" not in source
     assert "os._exit" not in source
-    assert "import atexit" not in source
-    assert "atexit.register" not in source
 
 
 def test_bounded_queue_is_the_only_buffer():

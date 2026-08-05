@@ -1,12 +1,14 @@
 """Event queue implementation for AgentCat.
 
 Process-safety contract: importing this module must be side-effect free
-beyond object construction — no threads, no signal handlers, no atexit
-hooks. Workers start lazily on first publish, are always daemon, and are
-never drained at interpreter exit: telemetry may be lost on shutdown, the
-customer's process may never be delayed or redirected by it.
+beyond object construction — no threads, no signal handlers, no exit
+hooks. The worker starts lazily on first publish and is always daemon.
+First publish also registers one bounded exit hook that STOPS the worker
+— it never sends: telemetry may be lost on shutdown, the customer's
+process may never be delayed or redirected by it.
 """
 
+import atexit
 import queue
 import sys
 import threading
@@ -52,7 +54,9 @@ class EventQueue:
         self.queue: queue.Queue[UnredactedEvent | _Stop] = queue.Queue(maxsize=10000)
         self.max_retries = 3
         self.max_queue_size = 10000  # Prevent unbounded growth
-        self.concurrency = 5  # Max parallel requests
+        # One publish at a time keeps the thread footprint minimal; the
+        # bounded queue absorbs bursts and add() drops on overflow.
+        self.concurrency = 1
 
         # Allow injection of api_client for testing
         if api_client is None:
@@ -75,6 +79,7 @@ class EventQueue:
 
     def _ensure_workers(self) -> None:
         """Start the consumer threads on first use."""
+        global _exit_stop_registered
         if self._workers_started:
             return
         with self._lock:
@@ -89,6 +94,12 @@ class EventQueue:
                 t.start()
                 self._workers.append(t)
             self._workers_started = True
+            # The moment threads exist, the process needs the exit hook that
+            # stops them (see _stop_workers_at_exit). Registered here, not at
+            # import, so importing the SDK stays side-effect free.
+            if not _exit_stop_registered:
+                atexit.register(_stop_workers_at_exit)
+                _exit_stop_registered = True
 
     def configure(self, api_base_url: str) -> None:
         """Reconfigure the API client with a new base URL."""
@@ -119,12 +130,14 @@ class EventQueue:
         queue fills and add() drops, so memory is genuinely capped at
         max_queue_size events.
 
-        The get() must stay untimed: a daemon thread that wakes from a timed
-        wait while the interpreter is finalizing is killed via pthread_exit(),
+        The untimed get() keeps an idle worker fully parked (no periodic
+        wakes); _stop_workers() wakes it with a _Stop marker. The real exit
+        safety, though, is the atexit hook: a daemon thread still executing
+        when interpreter finalization begins is killed via pthread_exit(),
         and on Linux/glibc that aborts the whole process — SIGABRT over the
-        customer's exit code (CPython gh-87135, fixed in 3.14). A thread
-        parked in an untimed wait never wakes on its own, so interpreter exit
-        cannot hit that path; destroy() wakes workers with a _Stop marker.
+        customer's exit code (CPython gh-87135, fixed in 3.14). The hook
+        stops this thread before finalization starts, so that window never
+        opens.
         """
         while not self._shutdown_event.is_set():
             event = self.queue.get()
@@ -239,11 +252,11 @@ class EventQueue:
             "isProcessing": active > 0,
         }
 
-    def destroy(self) -> None:
-        """Stop workers and stop accepting events. Bounded; for tests and
-        explicit shutdown — nothing registers it at exit anymore. A worker
-        wedged in a customer hook outlives the join as a daemon and dies
-        with the process.
+    def _stop_workers(self, join_budget: float = 1.0) -> None:
+        """Flag shutdown, wake parked or backing-off workers, and join them
+        against one shared budget. Never sends anything. A worker wedged in
+        a customer hook outlives the join as a daemon and dies with the
+        process.
         """
         self._shutdown = True
         self._shutdown_event.set()
@@ -259,12 +272,17 @@ class EventQueue:
                 except queue.Full:
                     break
 
-        # Shared 1s budget across all joins, never per-thread.
-        deadline = time.monotonic() + 1.0
+        # Shared budget across all joins, never per-thread.
+        deadline = time.monotonic() + join_budget
         for t in self._workers:
             if t is threading.current_thread():
-                continue  # destroy() called from a worker
+                continue  # called from a worker
             t.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    def destroy(self) -> None:
+        """Stop workers and stop accepting events. Bounded; for tests and
+        explicit shutdown."""
+        self._stop_workers()
 
         remaining = sum(
             1 for item in list(self.queue.queue) if not isinstance(item, _Stop)
@@ -303,9 +321,30 @@ def set_telemetry_manager(manager: Optional["TelemetryManager"]) -> None:
 
 # Global event queue instance. Constructing it starts no threads (workers
 # are lazy), so this module is importable from any thread. The SDK installs
-# no signal handlers and no exit hooks for events: the customer's process
+# no signal handlers and never drains events at exit: the customer's process
 # owns its own shutdown, and undelivered telemetry is dropped by design.
 event_queue = EventQueue()
+
+# Set once the exit hook below is registered (on first publish, never at
+# import).
+_exit_stop_registered = False
+
+
+def _stop_workers_at_exit() -> None:
+    """Stop, never drain. A daemon thread still executing when interpreter
+    finalization begins is killed via pthread_exit(), which aborts the whole
+    process on Linux/glibc (CPython gh-87135, fixed in 3.14). atexit
+    callbacks run before the finalizing flag is set, so stopping the worker
+    here removes that abort path — and setting the shutdown event also wakes
+    a worker parked in the retry backoff. Queued events are dropped by
+    design; nothing is sent from this hook. Forced exits and unhandled
+    signals skip atexit but also skip finalization, so they carry no abort
+    risk to begin with.
+    """
+    try:
+        event_queue._stop_workers()
+    except Exception:
+        pass
 
 
 def set_event_queue(new_queue: EventQueue) -> None:

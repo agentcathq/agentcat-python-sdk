@@ -121,8 +121,10 @@ def test_flush_at_exit_swallows_post_failures():
         diagnostics._flush_at_exit()  # must not raise
 
 
-def test_the_diagnostics_hook_is_the_only_atexit_in_the_sdk():
-    """The no-drain-at-exit decision, pinned: one bounded atexit hook total."""
+def test_the_sdk_has_exactly_two_bounded_atexit_hooks():
+    """The no-drain-at-exit decision, pinned: two bounded atexit hooks total —
+    the diagnostics beacon (~2s cap, skipped when empty) and the event-queue
+    worker stop (~1s join budget, sends nothing). Neither drains events."""
     import pathlib
 
     import agentcat
@@ -133,4 +135,4 @@ def test_the_diagnostics_hook_is_the_only_atexit_in_the_sdk():
         text = path.read_text()
         if "atexit.register" in text:
             registrations.append(path.name)
-    assert registrations == ["diagnostics.py"], registrations
+    assert sorted(registrations) == ["diagnostics.py", "event_queue.py"], registrations

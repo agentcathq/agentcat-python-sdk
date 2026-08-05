@@ -184,6 +184,52 @@ print("NO-LEAK")
     assert "NO-LEAK" in result.stdout
 
 
+def test_worker_stop_hook_registers_on_first_publish_not_at_import():
+    """Importing the queue module must not register exit hooks; the bounded
+    worker-stop hook appears only once a publish has started the worker."""
+    result = _run(
+        """
+import atexit
+from datetime import datetime, timezone
+
+# Diagnostics registers its own hook at its import; measure after it.
+import agentcat.modules.event_queue  # noqa: F401
+
+baseline = atexit._ncallbacks()
+
+from agentcat.modules.event_queue import event_queue
+from agentcat.types import UnredactedEvent
+
+assert atexit._ncallbacks() == baseline, "import registered an exit hook"
+
+event_queue.add(
+    UnredactedEvent(
+        id="first",
+        event_type="mcp:tools/call",
+        project_id=None,
+        session_id="ses_x",
+        timestamp=datetime.now(timezone.utc),
+    )
+)
+assert atexit._ncallbacks() == baseline + 1, "first publish must register the stop hook"
+
+event_queue.add(
+    UnredactedEvent(
+        id="second",
+        event_type="mcp:tools/call",
+        project_id=None,
+        session_id="ses_x",
+        timestamp=datetime.now(timezone.utc),
+    )
+)
+assert atexit._ncallbacks() == baseline + 1, "hook must register exactly once"
+print("LAZY-HOOK")
+"""
+    )
+    assert result.returncode == 0, result.stderr
+    assert "LAZY-HOOK" in result.stdout
+
+
 def test_import_survives_missing_distribution_metadata():
     """Finding 2: PackageNotFoundError at import time degrades the version
     string instead of crashing the customer's server at startup."""

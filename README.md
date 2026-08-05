@@ -279,12 +279,17 @@ Two behaviors are worth knowing before you read your first dashboard. Both are d
 ### Shutdown behavior
 
 AgentCat never touches your process lifecycle: no signal handlers, no forced
-exits, and no exit-time event drain. Every SDK thread is a daemon, so your
-shutdown — `Ctrl-C`, `SIGTERM`, `sys.exit()` — runs exactly as it would
-untracked, and is never delayed by AgentCat. The trade: telemetry still queued
-at the moment the process exits is dropped rather than flushed. The one exit
-hook the SDK keeps is the internal-diagnostics beacon below — skipped when
-there is nothing buffered, capped at ~2 seconds when there is.
+exits, and no exit-time event drain. The SDK's single publish worker is a
+daemon thread, so your shutdown — `Ctrl-C`, `SIGTERM`, `sys.exit()` — runs
+exactly as it would untracked, and is never delayed by AgentCat. The trade:
+telemetry still queued at the moment the process exits is dropped rather than
+flushed. The SDK keeps exactly two bounded exit hooks, neither of which sends
+events: one stops the publish worker before interpreter finalization (instant
+when idle, ~1-second cap otherwise — on Linux with CPython ≤3.13 a daemon
+thread still running during finalization can abort the process, CPython
+gh-87135, and stopping first closes that path), and the internal-diagnostics
+beacon below — skipped when there is nothing buffered, capped at ~2 seconds
+when there is.
 
 ### Internal diagnostics
 
