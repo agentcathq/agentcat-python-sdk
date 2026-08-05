@@ -38,11 +38,18 @@ SDK_LANGUAGE = f"Python {sys.version_info.major}.{sys.version_info.minor}"
 PUBLISH_TIMEOUT_SECONDS = 10
 
 
+class _Stop:
+    """Marker destroy() enqueues to wake workers parked in the untimed get()."""
+
+
+_STOP = _Stop()
+
+
 class EventQueue:
     """Manages event queue and sending to AgentCat API."""
 
     def __init__(self, api_client=None):
-        self.queue: queue.Queue[UnredactedEvent] = queue.Queue(maxsize=10000)
+        self.queue: queue.Queue[UnredactedEvent | _Stop] = queue.Queue(maxsize=10000)
         self.max_retries = 3
         self.max_queue_size = 10000  # Prevent unbounded growth
         self.concurrency = 5  # Max parallel requests
@@ -111,12 +118,18 @@ class EventQueue:
         No intermediate executor — when every worker is busy the bounded
         queue fills and add() drops, so memory is genuinely capped at
         max_queue_size events.
+
+        The get() must stay untimed: a daemon thread that wakes from a timed
+        wait while the interpreter is finalizing is killed via pthread_exit(),
+        and on Linux/glibc that aborts the whole process — SIGABRT over the
+        customer's exit code (CPython gh-87135, fixed in 3.14). A thread
+        parked in an untimed wait never wakes on its own, so interpreter exit
+        cannot hit that path; destroy() wakes workers with a _Stop marker.
         """
         while not self._shutdown_event.is_set():
-            try:
-                event = self.queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
+            event = self.queue.get()
+            if isinstance(event, _Stop):
+                break
             with self._lock:
                 self._active += 1
             try:
@@ -235,6 +248,17 @@ class EventQueue:
         self._shutdown = True
         self._shutdown_event.set()
 
+        # Wake workers parked in the untimed get(). Best-effort: a full queue
+        # means no worker is parked (a parked worker would have taken an item
+        # already), and busy workers re-check the shutdown event before
+        # parking again.
+        if self._workers_started:
+            for _ in range(self.concurrency):
+                try:
+                    self.queue.put_nowait(_STOP)
+                except queue.Full:
+                    break
+
         # Shared 1s budget across all joins, never per-thread.
         deadline = time.monotonic() + 1.0
         for t in self._workers:
@@ -242,7 +266,9 @@ class EventQueue:
                 continue  # destroy() called from a worker
             t.join(timeout=max(0.0, deadline - time.monotonic()))
 
-        remaining = self.queue.qsize()
+        remaining = sum(
+            1 for item in list(self.queue.queue) if not isinstance(item, _Stop)
+        )
         if remaining > 0:
             write_to_log(f"Event queue destroyed with {remaining} events unprocessed.")
 

@@ -534,6 +534,33 @@ class TestEventQueue:
         assert mock_log.called
         assert any(str(num_events) in str(call) for call in mock_log.call_args_list)
 
+    @patch("agentcat.modules.event_queue.write_to_log")
+    def test_destroy_wakeup_markers_are_not_counted_as_events(self, mock_log):
+        """The _Stop markers destroy() enqueues to wake idle parked workers
+        must never show up in the unprocessed-events count."""
+        eq = EventQueue()
+        eq._process_event = lambda event: None
+        eq.add(
+            UnredactedEvent(
+                id="drains",
+                event_type="mcp:tools/call",
+                project_id="project-123",
+                session_id="session-123",
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if eq.queue.qsize() == 0 and eq.get_stats()["activeRequests"] == 0:
+                break
+            time.sleep(0.01)
+
+        eq.destroy()
+
+        assert not any(
+            "unprocessed" in str(logged) for logged in mock_log.call_args_list
+        )
+
     def test_worker_thread_processes_events(self):
         """Test that worker thread processes events from queue."""
         eq = EventQueue()
