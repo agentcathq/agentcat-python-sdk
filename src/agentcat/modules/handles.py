@@ -15,6 +15,7 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_AGENT_ID,
     AGENTCAT_TAG_AGENT_SOURCE,
     AGENTCAT_TAG_MRTR,
+    AGENTCAT_TAG_NESTED,
     AGENTCAT_TAG_PROTOCOL_VERSION,
     AGENTCAT_TAG_SESSION_SOURCE,
     MCP_INSTRUCTIONS_KEY,
@@ -304,6 +305,7 @@ def build_handle_tags(
     res: HandleResolution,
     protocol_version: str | None = None,
     mrtr: str | None = None,
+    nested: bool = False,
 ) -> dict[str, str]:
     tags: dict[str, str] = {AGENTCAT_TAG_SESSION_SOURCE: res.session_source}
     if res.agent_id and res.agent_source:
@@ -313,4 +315,6 @@ def build_handle_tags(
         tags[AGENTCAT_TAG_PROTOCOL_VERSION] = _clamp_tag_value(protocol_version)
     if mrtr:
         tags[AGENTCAT_TAG_MRTR] = mrtr
+    if nested:
+        tags[AGENTCAT_TAG_NESTED] = "true"
     return tags

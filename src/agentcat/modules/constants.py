@@ -34,6 +34,10 @@ AGENTCAT_TAG_AGENT_ID = "agentcat_agent_id"
 AGENTCAT_TAG_AGENT_SOURCE = "agentcat_agent_id_source"
 AGENTCAT_TAG_PROTOCOL_VERSION = "agentcat_protocol_version"
 AGENTCAT_TAG_MRTR = "agentcat_mrtr"
+# Presence-gated: rides only on tools/call events the customer's own server
+# made from inside another tracked call (a code-mode sandbox, a tool calling
+# a sibling tool). Value is always "true"; absent on agent-facing calls.
+AGENTCAT_TAG_NESTED = "agentcat_nested"
 AGENTCAT_CUSTOM_EVENT_TYPE = "agentcat:custom"
 
 # ── Explicit handles: agent-facing copy (byte-identical to TS constants.ts) ──
