@@ -272,6 +272,7 @@ async def publish_tool_call_event(
     duration_ms: int | None,
     mrtr: str | None,
     extra_params: dict[str, Any] | None,
+    nested: bool = False,
 ) -> None:
     """Publish the one event a v2 tool call produces. Never raises.
 
@@ -312,7 +313,7 @@ async def publish_tool_call_event(
         # from the customer cap.
         event.tags = {
             **(event.tags or {}),
-            **build_handle_tags(rc.resolution, rc.protocol_version, mrtr),
+            **build_handle_tags(rc.resolution, rc.protocol_version, mrtr, nested),
         }
         event_queue.publish_event(server_key, event)
     except Exception as e:

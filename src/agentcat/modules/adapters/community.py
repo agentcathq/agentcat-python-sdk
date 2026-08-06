@@ -12,7 +12,7 @@ resolve, strip, decorate or publish belongs to
 :mod:`agentcat.modules.callpath` and is not re-derived here — the v1 middleware
 this replaces reimplemented all of it inline.
 
-Three invariants the middleware exists to protect:
+Four invariants the middleware exists to protect:
 
 - **Nothing customer-owned is mutated.** Tool schemas are copied before the
   injection pipeline rewrites them in place, and the request message is cloned
@@ -25,6 +25,14 @@ Three invariants the middleware exists to protect:
   never caches our injected schemas.
 - **The event records the call as the agent made it.** Raw (unstripped)
   arguments and the customer's undecorated result; the mint-back is wire-only.
+- **A server-internal call is not an agent.** While a tracked call is in
+  flight, a nested ``tools/list`` on the same server is served verbatim (no
+  injection, no registry rebuild) and a nested ``tools/call`` joins the
+  enclosing call's session, is tagged ``agentcat_nested``, and is never
+  decorated — a code-mode sandbox reading its own catalog or chaining its own
+  tools must see the customer's data, not AgentCat's, and must never
+  overwrite the registries the AGENT-facing listing built. See the
+  re-entrancy block above ``_CallFrame``.
 
 ``AgentCatMiddleware`` deliberately does not subclass ``fastmcp``'s
 ``Middleware``: that would require a module-scope ``fastmcp`` import, and
@@ -35,8 +43,11 @@ reproduced in ``__call__``.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import weakref
+from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 from agentcat.modules.adapters._common import (
@@ -57,6 +68,7 @@ from agentcat.modules.callpath import (
 )
 from agentcat.modules.constants import GET_MORE_TOOLS_NAME
 from agentcat.modules.exceptions import capture_exception
+from agentcat.modules.handles import HandleResolution
 from agentcat.modules.injection import ToolSpec, build_injected_schemas
 from agentcat.modules.logging import write_to_log
 from agentcat.modules.request_extra import extra_from_request_context
@@ -151,6 +163,112 @@ def _flattened(result: Any) -> Any:
         return result.to_mcp_result()
     except Exception:
         return result
+
+
+# ── re-entrancy: telling the agent's traffic from the server's own ───────────
+#
+# A customer tool can drive its own server mid-call: FastMCP's
+# ``CatalogTransform.get_tool_catalog`` lists the raw backend catalog with
+# ``run_middleware=True`` (code mode's discovery and execute tools do this on
+# every call), and a tool body may call ``ctx.fastmcp.call_tool`` for a
+# sibling tool. Both re-enter this middleware, and both must be recognized:
+# a nested listing rebuilt the injection registries from the backend catalog
+# (clobbering the agent-facing ones, after which the strip removed nothing and
+# the agent's next echoed ``session_id`` failed FastMCP validation), and a
+# nested call minted its own session and carried mint-back decoration into a
+# sandbox where agent-authored code tripped over it.
+#
+# The marker cannot live on the middleware object — one instance serves every
+# connection concurrently. It rides FastMCP's own per-request state instead:
+# ``Context.__aenter__`` hands a child context its parent's ``_request_state``
+# DICT BY REFERENCE (fastmcp ``server/context.py``), so a frame stored here by
+# the outer call is visible to every context the call opens beneath itself —
+# the catalog fetch's listing, the inner ``call_tool``, nesting of nesting —
+# with no bookkeeping of our own. Two prices, both paid below: the dict is
+# shared across SERVERS too (a frame carries its server and readers compare
+# identity), and the parent context can outlive one call (the installer
+# restores the previous value on exit rather than popping, so siblings under
+# one request-level context never see a stale frame).
+#
+# ``_request_state`` is private FastMCP surface, adopted deliberately: the
+# daily version-sweep CI runs the nested-call tests against every published
+# fastmcp release, so an upstream change to these semantics fails loudly, and
+# on any path without a usable ``fastmcp_context`` the helpers answer None and
+# the adapter degrades to its pre-frame behavior.
+
+_FRAME_KEY = "_agentcat_call_frame"
+
+
+class _CallFrame:
+    """One in-flight ``on_call_tool`` on one server.
+
+    ``resolution`` starts None and is assigned once the call resolves; the
+    shared dict holds a REFERENCE to the frame, so the late write is visible
+    to nested readers. A nested call that arrives before the outer resolve
+    completes (a customer hook driving its own server) sees None and simply
+    behaves as a top-level call — the listing pass-through, which protects the
+    registries, needs only the frame itself.
+    """
+
+    __slots__ = ("server", "resolution")
+
+    def __init__(self, server: Any) -> None:
+        self.server = server
+        self.resolution: HandleResolution | None = None
+
+
+def _request_state_of(context: Any) -> dict[str, Any] | None:
+    """The FastMCP request-state dict behind a middleware call, or None."""
+    try:
+        ctx = getattr(context, "fastmcp_context", None)
+        state = getattr(ctx, "_request_state", None)
+        return state if isinstance(state, dict) else None
+    except Exception:
+        return None
+
+
+def _enclosing_frame(state: dict[str, Any] | None, server: Any) -> _CallFrame | None:
+    """The frame of an in-flight call on ``server``, or None.
+
+    Identity, not equality: the dict is shared across every server nested
+    under one request, and a frame from server A must be invisible to B's
+    middleware (mounted and multi-server setups).
+    """
+    if state is None:
+        return None
+    frame = state.get(_FRAME_KEY)
+    if isinstance(frame, _CallFrame) and frame.server is server:
+        return frame
+    return None
+
+
+@contextlib.contextmanager
+def _call_frame(
+    context: Any, server: Any
+) -> Iterator[tuple[_CallFrame | None, _CallFrame | None]]:
+    """Install this call's frame; yield ``(enclosing, frame)``.
+
+    Restore-not-pop on exit: a nested call overwrites the shared key, and the
+    key must survive back to the enclosing call's value — while a parent
+    context that outlives this call (one request-level context over several
+    calls) must not see this call's frame after it returns.
+    """
+    state = _request_state_of(context)
+    if state is None:
+        yield None, None
+        return
+    enclosing = _enclosing_frame(state, server)
+    absent = _FRAME_KEY not in state
+    prev = state.get(_FRAME_KEY)
+    frame = _CallFrame(server)
+    state[_FRAME_KEY] = frame
+    try:
+        yield enclosing, frame
+    finally:
+        if absent:
+            state.pop(_FRAME_KEY, None)
+        else:
+            state[_FRAME_KEY] = prev
 
 
 class AgentCatMiddleware:
@@ -317,6 +435,14 @@ class AgentCatMiddleware:
         Publishes nothing: v2 intercepts ``tools/list`` for schema injection
         only. On any failure the customer's own list is served unmodified.
         """
+        # A listing the customer's own tool is making mid-call — a code-mode
+        # catalog fetch, most commonly — is served VERBATIM: no injection, no
+        # registry writes, no concession. Injecting would hand agent-facing
+        # parameters to a sandbox that cannot echo them, and rebuilding the
+        # registries from the raw backend catalog would replace the ones the
+        # agent-facing listing built (see the re-entrancy block above).
+        if _enclosing_frame(_request_state_of(context), self._server) is not None:
+            return await call_next(context)
         # The list handed back here has passed through every layer below us, so
         # it may hold COPIES of our own tool — hence authoritative=False.
         tools = await self._concede_get_more_tools(
@@ -478,101 +604,139 @@ class AgentCatMiddleware:
             )
             return [spec for spec in specs if spec is not None]
 
-        stripped = await get_stripped_arguments(
-            tracking, options, name, raw_arguments, rebuild
-        )
-        stripped_context = context.copy(
-            message=message.model_copy(update={"arguments": stripped})
-        )
-
-        # Tracing off: still strip what we injected, so the customer's tool runs
-        # exactly as it would untracked — then get out of the way. No handle
-        # resolution, no mint-back (there is no session_id parameter to echo), and
-        # no event.
-        if not options.enable_tracing:
-            return await call_next(stripped_context)
-
-        request_context = _request_context(context)
-        try:
-            # Resolved fresh every round: the ResolvedCall carries this round's
-            # message/extra for the customer's tag and property callbacks.
-            resolved = await resolve_call(
-                tracking,
-                name,
-                raw_arguments,
-                message,
-                request_context,
-                meta_sources=self._meta_sources(message, request_context),
-                legacy_client=lambda: self._legacy_client_info(request_context),
+        # The frame is open for the whole call — including the tracing-off and
+        # degraded returns below, whose nested listings must still pass through
+        # (context injection is independent of tracing, so a clobbered registry
+        # would eat the next call's `context` there too).
+        with _call_frame(context, self._server) as (enclosing, frame):
+            stripped = await get_stripped_arguments(
+                tracking, options, name, raw_arguments, rebuild
             )
-        except Exception as e:
-            # Belt and braces at the customer boundary: the resolvers are all
-            # documented not to raise, but a tool call must never fail because
-            # analytics did. Degrade to an untraced call.
-            write_to_log(
-                f"Warning: AgentCat resolution failed for tool '{name}', running "
-                f"it untraced - {e}"
+            stripped_context = context.copy(
+                message=message.model_copy(update={"arguments": stripped})
             )
-            return await call_next(stripped_context)
 
-        started = now_ms()
-        extra_params = extra_from_request_context(
-            request_context, getattr(context, "fastmcp_context", None)
-        )
+            # Tracing off: still strip what we injected, so the customer's tool
+            # runs exactly as it would untracked — then get out of the way. No
+            # handle resolution, no mint-back (there is no session_id parameter
+            # to echo), and no event.
+            if not options.enable_tracing:
+                return await call_next(stripped_context)
 
-        # The tap's slot is open for exactly the rest of the chain and the
-        # publish that reads it, and closes on every exit path including the
-        # raise below.
-        with inner_tap() as tap:
+            request_context = _request_context(context)
             try:
-                result = await call_next(stripped_context)
+                # Resolved fresh every round: the ResolvedCall carries this
+                # round's message/extra for the customer's tag and property
+                # callbacks.
+                resolved = await resolve_call(
+                    tracking,
+                    name,
+                    raw_arguments,
+                    message,
+                    request_context,
+                    meta_sources=self._meta_sources(message, request_context),
+                    legacy_client=lambda: self._legacy_client_info(request_context),
+                )
             except Exception as e:
-                # FastMCP surfaces a failing tool as a raised error, so unlike
-                # the official adapters this path holds the live exception,
-                # with its type and traceback intact.
+                # Belt and braces at the customer boundary: the resolvers are
+                # all documented not to raise, but a tool call must never fail
+                # because analytics did. Degrade to an untraced call.
+                write_to_log(
+                    f"Warning: AgentCat resolution failed for tool '{name}', "
+                    f"running it untraced - {e}"
+                )
+                return await call_next(stripped_context)
+
+            # A nested call is the customer's own server calling itself from
+            # inside the enclosing call — one logical agent action. It joins
+            # the enclosing session rather than minting its own, and
+            # `prompts_session_id=False` keeps the tags honest: there is no
+            # parameter here for an agent to echo, because the enclosing frame
+            # is the only caller. Everything per-call — actor, client, intent —
+            # keeps its own resolution.
+            inherited = enclosing.resolution if enclosing is not None else None
+            nested = inherited is not None
+            if inherited is not None:
+                resolved.resolution = replace(
+                    resolved.resolution,
+                    session_id=inherited.session_id,
+                    session_source=inherited.session_source,
+                    prompts_session_id=False,
+                )
+            if frame is not None:
+                # Assigned post-override, so nesting of nesting inherits the
+                # OUTERMOST session: the whole tree is one logical call.
+                frame.resolution = resolved.resolution
+
+            started = now_ms()
+            extra_params = extra_from_request_context(
+                request_context, getattr(context, "fastmcp_context", None)
+            )
+
+            # The tap's slot is open for exactly the rest of the chain and the
+            # publish that reads it, and closes on every exit path including
+            # the raise below.
+            with inner_tap() as tap:
+                try:
+                    result = await call_next(stripped_context)
+                except Exception as e:
+                    # FastMCP surfaces a failing tool as a raised error, so
+                    # unlike the official adapters this path holds the live
+                    # exception, with its type and traceback intact.
+                    await self._publish(
+                        tracking,
+                        resolved,
+                        name,
+                        raw_arguments,
+                        response=None,
+                        is_error=True,
+                        error=capture_exception(e),
+                        started=started,
+                        mrtr=None,
+                        extra_params=extra_params,
+                        nested=nested,
+                    )
+                    raise
+
+                mrtr = detect_mrtr(
+                    self._result_type(result),
+                    getattr(message, "input_responses", None) is not None,
+                    getattr(message, "request_state", None) is not None,
+                )
+                is_error = bool(getattr(result, "is_error", False))
                 await self._publish(
                     tracking,
                     resolved,
                     name,
                     raw_arguments,
-                    response=None,
-                    is_error=True,
-                    error=capture_exception(e),
+                    response=response_payload(result),
+                    is_error=is_error,
+                    # An `is_error` result that never raised THROUGH us: a
+                    # layer below answered with one. The tap holds the
+                    # exception when a local one produced it, and there simply
+                    # is none when a proxy passed an upstream error through —
+                    # then the surfaced message is the whole truth.
+                    error=tap.error(_flattened(result)) if is_error else None,
                     started=started,
-                    mrtr=None,
+                    mrtr=mrtr,
                     extra_params=extra_params,
+                    nested=nested,
                 )
-                raise
 
-            mrtr = detect_mrtr(
-                self._result_type(result),
-                getattr(message, "input_responses", None) is not None,
-                getattr(message, "request_state", None) is not None,
-            )
-            is_error = bool(getattr(result, "is_error", False))
-            await self._publish(
-                tracking,
-                resolved,
-                name,
-                raw_arguments,
-                response=response_payload(result),
-                is_error=is_error,
-                # An `is_error` result that never raised THROUGH us: a layer
-                # below answered with one. The tap holds the exception when a
-                # local one produced it, and there simply is none when a proxy
-                # passed an upstream error through — then the surfaced message
-                # is the whole truth.
-                error=tap.error(_flattened(result)) if is_error else None,
-                started=started,
-                mrtr=mrtr,
-                extra_params=extra_params,
-            )
-
-        # An intermediate multi-round-trip round is never decorated: only the
-        # completing round carries the mint-back (changelog 6.4).
-        if mrtr == "input_required":
-            return result
-        return self._decorated(result, resolved, name, tracking)
+            # An intermediate multi-round-trip round is never decorated: only
+            # the completing round carries the mint-back (changelog 6.4).
+            if mrtr == "input_required":
+                return result
+            # A nested call's "wire" is the customer's own tool body — a
+            # code-mode sandbox, a composing tool. Decoration there is not an
+            # instruction to an agent, it is corrupted data: agent-authored
+            # code chokes on the extra key, and a sandbox that returns the
+            # inner dict verbatim advertises a stale handle on the real wire.
+            # `prompts_session_id=False` already silences the session mint-back;
+            # this return also closes the agent_id-confirmed mirror branch.
+            if nested:
+                return result
+            return self._decorated(result, resolved, name, tracking)
 
     def _result_type(self, result: Any) -> str | None:
         """The 2026-era ``resultType`` discriminator, however it is spelled."""
@@ -597,6 +761,7 @@ class AgentCatMiddleware:
         started: int,
         mrtr: str | None,
         extra_params: dict[str, Any],
+        nested: bool = False,
     ) -> None:
         await publish_tool_call_event(
             self._server,
@@ -610,6 +775,7 @@ class AgentCatMiddleware:
             duration_ms=now_ms() - started,
             mrtr=mrtr,
             extra_params=extra_params,
+            nested=nested,
         )
 
     def _decorated(

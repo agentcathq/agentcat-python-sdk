@@ -57,6 +57,7 @@ _MODERN_ONLY = (
     # dereferencing middleware and real multi-round-trip results, none of which
     # exist on the 3.x line this suite's community/ directory covers.
     "test_community_v4_handles.py",
+    "test_community_v4_nested_calls.py",
 )
 
 # Needs community FastMCP importable at all, independent of era. The

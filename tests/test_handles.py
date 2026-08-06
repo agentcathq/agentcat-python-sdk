@@ -427,6 +427,16 @@ def test_tag_clamp():
     assert build_handle_tags(HandleResolution("s", "minted")) == {"agentcat_session_id_source": "minted"}  # noqa: E501
 
 
+# The nested marker is presence-gated like mrtr: "true" on a server-internal
+# call, absent everywhere else — the default keeps every existing event's tag
+# map byte-identical.
+def test_tags_nested_marker_is_presence_gated():
+    res = HandleResolution(sid("T"), "supplied")
+    assert build_handle_tags(res, nested=True)["agentcat_nested"] == "true"
+    assert "agentcat_nested" not in build_handle_tags(res)
+    assert "agentcat_nested" not in build_handle_tags(res, nested=False)
+
+
 # TS handles.test.ts:174-240 — the full tag map for a normal agent_id, and the
 # clamp/newline-strip applying to the tag copy only, never the resolution.
 def test_tags_pass_a_normal_agent_id_through():
