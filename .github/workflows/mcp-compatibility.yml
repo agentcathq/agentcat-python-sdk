@@ -134,7 +134,7 @@ jobs:
 
     - name: Upload failure artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: compat-failure-group-${{ matrix.group }}
         path: failure.json
@@ -230,7 +230,7 @@ jobs:
 
     - name: Upload failure artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: compat-failure-fastmcp-${{ matrix.fastmcp-version }}
         path: failure.json
@@ -308,7 +308,7 @@ jobs:
 
     - name: Upload failure artifact
       if: failure()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: compat-failure-mcp-${{ matrix.mcp-version }}
         path: failure.json
