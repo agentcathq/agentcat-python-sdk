@@ -11,10 +11,13 @@ inner result as agent-authored code would see it — is recorded into the
 ``observed`` dict the factory takes, so tests can assert on the inside view as
 well as the wire.
 
-``CatalogTransform`` is imported from its module path deliberately: it is not
-in ``fastmcp.server.transforms.__all__``, and it first shipped mid-3.x — the
-guard flag keeps this module importable (and the tests skippable) on the older
-fastmcp releases the community extra still allows.
+Two guard flags, deliberately separate: ``CatalogTransform`` is imported from
+its module path (not in ``fastmcp.server.transforms.__all__``) and first
+shipped mid-3.x, so only the catalog-fetch factory needs it — the composing
+factories below use nothing newer than ``ctx.fastmcp.call_tool`` and must keep
+running on every fastmcp release the community extra allows. A single guard
+would silently shrink the daily version sweep's nested-call coverage to the
+transform-era releases.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -25,13 +28,19 @@ if TYPE_CHECKING:
 try:
     from fastmcp import FastMCP as CommunityFastMCP
     from fastmcp.server.context import Context
+
+    HAS_COMMUNITY_NESTING = True
+except ImportError:
+    CommunityFastMCP = None  # type: ignore
+    Context = None  # type: ignore
+    HAS_COMMUNITY_NESTING = False
+
+try:
     from fastmcp.server.transforms.catalog import CatalogTransform
     from fastmcp.tools import Tool
 
     HAS_CATALOG_TRANSFORM = True
 except ImportError:
-    CommunityFastMCP = None  # type: ignore
-    Context = None  # type: ignore
     CatalogTransform = object  # type: ignore
     Tool = None  # type: ignore
     HAS_CATALOG_TRANSFORM = False
@@ -44,6 +53,54 @@ META_TOOL_NAME = "run"
 
 class InnerToolFailed(RuntimeError):
     """Raised by the hidden `echo` on the sentinel text."""
+
+
+def create_composing_server(
+    observed: dict[str, Any], name: str = "composing"
+) -> "FastMCP":
+    """A plain FastMCP server whose LISTED tools call each other — no
+    transform, no hidden catalog. This is the ordinary shape of nesting
+    (`ctx.fastmcp.call_tool` from a tool body), available on every community
+    fastmcp release, so the tests built on it run across the whole version
+    sweep.
+
+    - ``compose(text)`` calls ``echo`` once: one level of nesting.
+    - ``fanout(a, b)`` runs two ``echo`` calls CONCURRENTLY via
+      ``asyncio.gather``: the inner frames install and restore in the shared
+      request state in completion order, which is exactly the interleaving
+      the re-entrancy machinery has to survive.
+    """
+    import asyncio
+
+    server = CommunityFastMCP(name)
+
+    @server.tool
+    async def echo(text: str) -> str:
+        """Echo the text back."""
+        observed.setdefault("delivered", []).append(("echo", {"text": text}))
+        if text == BOOM_TEXT:
+            raise InnerToolFailed("the inner tool failed")
+        return f"echo:{text}"
+
+    @server.tool
+    async def compose(text: str, ctx: Context = None) -> str:  # type: ignore[assignment]
+        """Call echo from inside another listed tool."""
+        observed.setdefault("delivered", []).append(("compose", {"text": text}))
+        inner = await ctx.fastmcp.call_tool("echo", {"text": text})
+        observed["inner_structured"] = inner.structured_content
+        return f"composed:{text}"
+
+    @server.tool
+    async def fanout(a: str, b: str, ctx: Context = None) -> str:  # type: ignore[assignment]
+        """Call echo twice, concurrently."""
+        results = await asyncio.gather(
+            ctx.fastmcp.call_tool("echo", {"text": a}),
+            ctx.fastmcp.call_tool("echo", {"text": b}),
+        )
+        observed["fanned"] = [r.structured_content for r in results]
+        return f"fanned:{a},{b}"
+
+    return server
 
 
 def create_catalog_meta_server(

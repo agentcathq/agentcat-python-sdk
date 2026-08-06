@@ -26,7 +26,9 @@ from agentcat.modules.constants import (
 from ..test_utils.community_catalog_server import (
     BOOM_TEXT,
     HAS_CATALOG_TRANSFORM,
+    HAS_COMMUNITY_NESTING,
     create_catalog_meta_server,
+    create_composing_server,
 )
 from ..test_utils.community_client import (
     HAS_COMMUNITY_CLIENT,
@@ -39,8 +41,16 @@ from ..test_utils.community_todo_server import (
 from ..test_utils.flavors import tracking_data
 
 pytestmark = pytest.mark.skipif(
-    not (HAS_COMMUNITY_FASTMCP and HAS_COMMUNITY_CLIENT and HAS_CATALOG_TRANSFORM),
-    reason="Community FastMCP with CatalogTransform not available",
+    not (HAS_COMMUNITY_FASTMCP and HAS_COMMUNITY_CLIENT and HAS_COMMUNITY_NESTING),
+    reason="Community FastMCP not available",
+)
+
+# Only the hidden-catalog shape needs `CatalogTransform` (mid-3.x); the
+# composing-server tests below run on every release the community extra
+# allows, so the daily version sweep keeps its nested-call coverage there.
+catalog = pytest.mark.skipif(
+    not HAS_CATALOG_TRANSFORM,
+    reason="fastmcp CatalogTransform not available",
 )
 
 MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
@@ -71,6 +81,7 @@ def _minted_from(result) -> str:
     return minted
 
 
+@catalog
 async def test_nested_listing_leaves_the_registries_alone():
     """The clobber itself: a mid-call catalog fetch must not replace the
     registries the agent-facing listing built."""
@@ -93,6 +104,7 @@ async def test_nested_listing_leaves_the_registries_alone():
     assert data.declared_session_params == set()
 
 
+@catalog
 async def test_the_echoed_session_id_still_strips_after_a_nested_call(capture):
     """THE repro: list → call → echo the minted handle on the next call.
 
@@ -125,6 +137,7 @@ async def test_the_echoed_session_id_still_strips_after_a_nested_call(capture):
     assert outer[1].tags[AGENTCAT_TAG_SESSION_SOURCE] == "supplied"
 
 
+@catalog
 async def test_a_nested_call_joins_the_session_and_is_never_decorated(capture):
     observed: dict = {}
     server = create_catalog_meta_server(observed)
@@ -156,6 +169,7 @@ async def test_a_nested_call_joins_the_session_and_is_never_decorated(capture):
     assert observed["inner_structured"] == {"result": "echo:hello"}
 
 
+@catalog
 async def test_the_outer_call_is_still_fully_decorated():
     """The registry survives the nested fetch, so the outer mint-back keeps
     both of its forms — the text block and the structured mirror (which the
@@ -174,6 +188,7 @@ async def test_the_outer_call_is_still_fully_decorated():
     assert result.structured_content["result"] == "ran:hello"
 
 
+@catalog
 async def test_the_nested_listing_is_served_uninjected():
     """The sandbox-facing catalog is the customer's raw view: parameters a
     sandbox cannot echo must never appear in it."""
@@ -193,6 +208,7 @@ async def test_the_nested_listing_is_served_uninjected():
     assert not any("session_id" in props for props in catalog.values())
 
 
+@catalog
 async def test_another_server_is_untouched_by_this_servers_frame():
     """The frame is scoped by server identity: a listing on server B while a
     call on server A is in flight still injects and still writes B's
@@ -212,6 +228,7 @@ async def test_another_server_is_untouched_by_this_servers_frame():
     assert "add_todo" in tracking_data(other).injected_params_registry
 
 
+@catalog
 async def test_nesting_of_nesting_shares_the_outermost_session(capture):
     observed: dict = {}
     server = create_catalog_meta_server(observed, target="compose")
@@ -227,6 +244,7 @@ async def test_nesting_of_nesting_shares_the_outermost_session(capture):
     assert [AGENTCAT_TAG_NESTED in e.tags for e in events] == [True, True, False]
 
 
+@catalog
 async def test_a_failing_nested_call_publishes_and_surfaces(capture):
     """The inner failure is recorded as a nested error event, and the raise
     reaches the customer's tool body unchanged — analytics never rewrites the
@@ -248,6 +266,7 @@ async def test_a_failing_nested_call_publishes_and_surfaces(capture):
     assert outer.is_error
 
 
+@catalog
 async def test_tracing_off_still_shields_the_registry():
     """Context injection is independent of tracing, so the frame must cover
     the tracing-off path too: a nested fetch there would otherwise eat the
@@ -270,6 +289,7 @@ async def test_tracing_off_still_shields_the_registry():
     assert ("run", {"program": "second"}) in observed["delivered"]
 
 
+@catalog
 async def test_sibling_calls_under_one_context_are_not_nested(capture):
     """Restore-not-pop: a parent fastmcp Context can outlive one call, and the
     sibling that follows must come up top-level — fresh session, no marker."""
@@ -291,3 +311,93 @@ async def test_sibling_calls_under_one_context_are_not_nested(capture):
     # Each run's inner echo still joined its OWN outer call's session.
     inner = [e for e in _call_events(capture) if e.resource_name == "echo"]
     assert [e.session_id for e in inner] == [e.session_id for e in outer]
+
+
+# ── plain composing servers: nesting without any transform ──────────────────
+# These run on EVERY community fastmcp release (no CatalogTransform guard):
+# `ctx.fastmcp.call_tool` from a tool body is the ordinary nesting shape, and
+# the daily version sweep must keep covering it on pre-transform releases.
+
+
+async def test_a_composing_tool_is_nested_without_any_transform(capture):
+    """The frame does not depend on transforms: a listed tool calling a
+    sibling gets the same treatment, and per-call resolution (the actor) is
+    still resolved on the nested event rather than copied from the outer."""
+    from agentcat.types import UserIdentity
+
+    observed: dict = {}
+    server = create_composing_server(observed)
+    track(
+        server,
+        "proj_test",
+        AgentCatOptions(
+            identify=lambda request, extra: UserIdentity(
+                user_id="actor-1", user_name="Composer", user_data=None
+            )
+        ),
+    )
+
+    async with create_community_test_client(server) as client:
+        await client.list_tools()
+        await client.call_tool(
+            "compose",
+            {"text": "hi", "context": "Composing one tool from another to test nesting"},
+        )
+
+    events = _call_events(capture)
+    assert [e.resource_name for e in events] == ["echo", "compose"]
+    inner, outer = events
+    assert inner.session_id == outer.session_id
+    assert inner.tags[AGENTCAT_TAG_NESTED] == "true"
+    assert AGENTCAT_TAG_NESTED not in outer.tags
+    # Undecorated inner result, exactly as the composing body consumed it.
+    assert observed["inner_structured"] == {"result": "echo:hi"}
+    # Actor resolution stayed per-call: the nested event carries its own.
+    assert inner.identify_actor_given_id == "actor-1"
+    assert outer.identify_actor_given_id == "actor-1"
+
+
+async def test_concurrent_inner_calls_all_join_the_outer_session(capture):
+    """Two inner calls running CONCURRENTLY (asyncio.gather in the tool body)
+    install and restore their frames in the shared request state in whatever
+    order they complete. Every one of them must still inherit the outer
+    session, and a later sequential call on the same server must come up
+    clean — no stale frame from the concurrent interleaving."""
+    observed: dict = {}
+    server = create_composing_server(observed)
+    track(server, "proj_test", AgentCatOptions())
+
+    async with create_community_test_client(server) as client:
+        await client.list_tools()
+        await client.call_tool(
+            "fanout",
+            {"a": "left", "b": "right", "context": "Fanning out two inner calls"},
+        )
+        await client.call_tool(
+            "compose",
+            {"text": "after", "context": "A sequential call after the fan-out"},
+        )
+
+    events = _call_events(capture)
+    fan_outer = next(e for e in events if e.resource_name == "fanout")
+    fan_inner = [
+        e
+        for e in events
+        if e.resource_name == "echo" and e.session_id == fan_outer.session_id
+    ]
+    assert len(fan_inner) == 2
+    assert all(e.tags[AGENTCAT_TAG_NESTED] == "true" for e in fan_inner)
+    assert AGENTCAT_TAG_NESTED not in fan_outer.tags
+    # The sandbox-side results came back clean from both concurrent calls.
+    assert observed["fanned"] == [{"result": "echo:left"}, {"result": "echo:right"}]
+
+    # The follow-up call is its own top-level call on a fresh session.
+    compose_outer = next(e for e in events if e.resource_name == "compose")
+    compose_inner = [
+        e
+        for e in events
+        if e.resource_name == "echo" and e.session_id == compose_outer.session_id
+    ]
+    assert compose_outer.session_id != fan_outer.session_id
+    assert AGENTCAT_TAG_NESTED not in compose_outer.tags
+    assert len(compose_inner) == 1

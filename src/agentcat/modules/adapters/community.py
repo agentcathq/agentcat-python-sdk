@@ -44,6 +44,7 @@ reproduced in ``__call__``.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import copy
 import weakref
 from collections.abc import Iterator
@@ -179,32 +180,34 @@ def _flattened(result: Any) -> Any:
 # sandbox where agent-authored code tripped over it.
 #
 # The marker cannot live on the middleware object — one instance serves every
-# connection concurrently. It rides FastMCP's own per-request state instead:
-# ``Context.__aenter__`` hands a child context its parent's ``_request_state``
-# DICT BY REFERENCE (fastmcp ``server/context.py``), so a frame stored here by
-# the outer call is visible to every context the call opens beneath itself —
-# the catalog fetch's listing, the inner ``call_tool``, nesting of nesting —
-# with no bookkeeping of our own. Two prices, both paid below: the dict is
-# shared across SERVERS too (a frame carries its server and readers compare
-# identity), and the parent context can outlive one call (the installer
-# restores the previous value on exit rather than popping, so siblings under
-# one request-level context never see a stale frame).
+# connection concurrently. It is a ContextVar tuple-stack of frames, the same
+# token set/reset pattern as ``_inner_tap``'s ``_open_seams``: a nested call
+# runs in the same task (or a child task's copied context) as the call that
+# made it, so the outer frame is visible exactly as far down as the nesting
+# reaches, and two top-level calls — separate tasks, separate contexts — can
+# never see each other's. FastMCP's own ``Context._request_state`` was
+# considered as the carrier (nested contexts share it by reference) and
+# rejected: the sharing only exists from mid-3.x, so on earlier releases the
+# frame would silently never propagate. A ContextVar has the same reach on
+# every release, and concurrent inner calls (``asyncio.gather`` in a tool
+# body) each get their own context copy rather than racing writes in a shared
+# dict.
 #
-# ``_request_state`` is private FastMCP surface, adopted deliberately: the
-# daily version-sweep CI runs the nested-call tests against every published
-# fastmcp release, so an upstream change to these semantics fails loudly, and
-# on any path without a usable ``fastmcp_context`` the helpers answer None and
-# the adapter degrades to its pre-frame behavior.
+# Frames still carry their server: one request can nest calls ACROSS servers
+# (mounted and multi-server setups), and a frame from server A must be
+# invisible to B's middleware — readers compare identity, never equality.
 
-_FRAME_KEY = "_agentcat_call_frame"
+_call_frames: contextvars.ContextVar[tuple[_CallFrame, ...]] = contextvars.ContextVar(
+    "agentcat_community_call_frames", default=()
+)
 
 
 class _CallFrame:
     """One in-flight ``on_call_tool`` on one server.
 
     ``resolution`` starts None and is assigned once the call resolves; the
-    shared dict holds a REFERENCE to the frame, so the late write is visible
-    to nested readers. A nested call that arrives before the outer resolve
+    stack holds a REFERENCE to the frame, so the late write is visible to
+    nested readers. A nested call that arrives before the outer resolve
     completes (a customer hook driving its own server) sees None and simply
     behaves as a top-level call — the listing pass-through, which protects the
     registries, needs only the frame itself.
@@ -217,58 +220,29 @@ class _CallFrame:
         self.resolution: HandleResolution | None = None
 
 
-def _request_state_of(context: Any) -> dict[str, Any] | None:
-    """The FastMCP request-state dict behind a middleware call, or None."""
-    try:
-        ctx = getattr(context, "fastmcp_context", None)
-        state = getattr(ctx, "_request_state", None)
-        return state if isinstance(state, dict) else None
-    except Exception:
-        return None
-
-
-def _enclosing_frame(state: dict[str, Any] | None, server: Any) -> _CallFrame | None:
-    """The frame of an in-flight call on ``server``, or None.
-
-    Identity, not equality: the dict is shared across every server nested
-    under one request, and a frame from server A must be invisible to B's
-    middleware (mounted and multi-server setups).
-    """
-    if state is None:
-        return None
-    frame = state.get(_FRAME_KEY)
-    if isinstance(frame, _CallFrame) and frame.server is server:
-        return frame
+def _enclosing_frame(server: Any) -> _CallFrame | None:
+    """The innermost open frame belonging to ``server``, or None."""
+    for frame in reversed(_call_frames.get()):
+        if frame.server is server:
+            return frame
     return None
 
 
 @contextlib.contextmanager
-def _call_frame(
-    context: Any, server: Any
-) -> Iterator[tuple[_CallFrame | None, _CallFrame | None]]:
-    """Install this call's frame; yield ``(enclosing, frame)``.
+def _call_frame(server: Any) -> Iterator[tuple[_CallFrame | None, _CallFrame]]:
+    """Push this call's frame; yield ``(enclosing, frame)``.
 
-    Restore-not-pop on exit: a nested call overwrites the shared key, and the
-    key must survive back to the enclosing call's value — while a parent
-    context that outlives this call (one request-level context over several
-    calls) must not see this call's frame after it returns.
+    A token reset, not a pop: it restores exactly the stack that was open
+    before, on every exit path including a raise, so an enclosing call gets
+    its own stack back and a sibling that follows starts clean.
     """
-    state = _request_state_of(context)
-    if state is None:
-        yield None, None
-        return
-    enclosing = _enclosing_frame(state, server)
-    absent = _FRAME_KEY not in state
-    prev = state.get(_FRAME_KEY)
+    enclosing = _enclosing_frame(server)
     frame = _CallFrame(server)
-    state[_FRAME_KEY] = frame
+    token = _call_frames.set((*_call_frames.get(), frame))
     try:
         yield enclosing, frame
     finally:
-        if absent:
-            state.pop(_FRAME_KEY, None)
-        else:
-            state[_FRAME_KEY] = prev
+        _call_frames.reset(token)
 
 
 class AgentCatMiddleware:
@@ -441,7 +415,7 @@ class AgentCatMiddleware:
         # parameters to a sandbox that cannot echo them, and rebuilding the
         # registries from the raw backend catalog would replace the ones the
         # agent-facing listing built (see the re-entrancy block above).
-        if _enclosing_frame(_request_state_of(context), self._server) is not None:
+        if _enclosing_frame(self._server) is not None:
             return await call_next(context)
         # The list handed back here has passed through every layer below us, so
         # it may hold COPIES of our own tool — hence authoritative=False.
@@ -608,7 +582,7 @@ class AgentCatMiddleware:
         # degraded returns below, whose nested listings must still pass through
         # (context injection is independent of tracing, so a clobbered registry
         # would eat the next call's `context` there too).
-        with _call_frame(context, self._server) as (enclosing, frame):
+        with _call_frame(self._server) as (enclosing, frame):
             stripped = await get_stripped_arguments(
                 tracking, options, name, raw_arguments, rebuild
             )
@@ -663,10 +637,9 @@ class AgentCatMiddleware:
                     session_source=inherited.session_source,
                     prompts_session_id=False,
                 )
-            if frame is not None:
-                # Assigned post-override, so nesting of nesting inherits the
-                # OUTERMOST session: the whole tree is one logical call.
-                frame.resolution = resolved.resolution
+            # Assigned post-override, so nesting of nesting inherits the
+            # OUTERMOST session: the whole tree is one logical call.
+            frame.resolution = resolved.resolution
 
             started = now_ms()
             extra_params = extra_from_request_context(
