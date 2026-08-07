@@ -38,6 +38,13 @@ IdentifyFunction = Callable[
 ]
 # Type alias for redaction function
 RedactionFunction = Callable[[str], str | Awaitable[str]]
+# Type alias for the event-level redaction hook. Receives the full event
+# (raw, unredacted values — it runs before RedactionFunction) and returns a
+# modified event, or None to drop the event entirely. Accepts sync or async
+# callables (mirrors RedactionFunction).
+RedactEventFunction = Callable[
+    ["Event"], Optional["Event"] | Awaitable[Optional["Event"]]
+]
 # Type alias for event_tags callback — returns str:str map attached to every auto-captured event.
 # Accepts sync or async callables (mirrors RedactionFunction).
 EventTagsFunction = Callable[
@@ -149,6 +156,7 @@ class EventType(str, Enum):
 
 class UnredactedEvent(Event):
     redaction_fn: RedactionFunction | None = None
+    event_redaction_fn: RedactEventFunction | None = None
 
 
 # Telemetry Exporter Configuration Types
@@ -202,6 +210,14 @@ class AgentCatOptions:
     # publishes anonymously rather than failing the tool call.
     identify: IdentifyFunction | None = None
     redact_sensitive_information: RedactionFunction | None = None
+    # Event-level redaction hook, invoked with the full event (raw, unredacted
+    # values) before redact_sensitive_information runs. May return a modified
+    # event, or None to drop the event entirely. May be sync or async. The
+    # system-managed fields id, session_id, project_id, event_type, and
+    # timestamp cannot be changed by this hook — they are restored from the
+    # original event afterward. If the hook raises (or times out), the event
+    # is dropped rather than published unredacted.
+    redact_event: RedactEventFunction | None = None
     exporters: dict[str, ExporterConfig] | None = None
     # Debug logging to ~/agentcat.log. Tri-state: None (the default) defers to
     # the AGENTCAT_DEBUG_MODE env var read at import; explicit True/False wins.

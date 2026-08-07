@@ -16,6 +16,10 @@ PROTECTED_FIELDS: Set[str] = {
     "id",
     "project_id",
     "server",
+    "server_name",
+    "server_version",
+    "client_name",
+    "client_version",
     "identify_actor_given_id",
     "identify_actor_name",
     "identify_data",
@@ -146,8 +150,82 @@ def redact_event(event: "UnredactedEvent", redact_fn: Callable[[str], str]) -> "
     if not callable(dump):
         plain: Event = redact_strings_in_object(event, redact, "", False)
         return plain
-    dumped = dump(exclude={"redaction_fn"}, warnings=False)
+    dumped = dump(exclude={"redaction_fn", "event_redaction_fn"}, warnings=False)
     redacted: Event = event.model_copy(
         update=redact_strings_in_object(dumped, redact, "", False)
     )
+    return redacted
+
+
+def _sync_event_redactor(
+    redact_event_fn: Callable[["Event"], Any],
+) -> Callable[["Event"], Any]:
+    """A synchronous view of the customer's event-level redaction hook.
+
+    Same rationale as `_sync_redactor`: the publish worker is a thread with no
+    event loop of its own, so an async hook's result has to be driven to
+    completion here rather than assigned straight into the pipeline.
+    """
+
+    def run(event: "Event") -> Any:
+        return drive_hook_result(redact_event_fn(event), "redact_event")
+
+    return run
+
+
+# Fields restored from the original event after the event-level redaction
+# hook runs, regardless of what the hook returns. These are system-managed —
+# not consumer-settable — mirroring RESTORED_FIELDS in the TypeScript SDK and
+# the equivalent snapshot/restore around ApplyEventRedaction in the Go SDK.
+RESTORED_FIELDS: Set[str] = {
+    "id",
+    "session_id",
+    "project_id",
+    "event_type",
+    "timestamp",
+}
+
+
+def apply_event_redaction(
+    event: "UnredactedEvent",
+    redact_event_fn: Callable[["Event"], Any],
+) -> "UnredactedEvent | None":
+    """
+    Applies the customer's event-level redaction hook to an event.
+
+    Runs before `redact_event` (the string-level hook), so the hook receives
+    raw, unredacted values. The hook may return a modified event, or None to
+    drop the event entirely. System-managed fields (RESTORED_FIELDS) are
+    force-restored from the original event afterward, so a hook cannot forge
+    or erase what AgentCat itself assigned.
+
+    The hook is handed a plain `Event` built from the dump, excluding
+    `redaction_fn`/`event_redaction_fn` — they are machinery, not event data,
+    and the customer's hook must not be handed its own function objects.
+
+    Args:
+        event: The event to run the hook on
+        redact_event_fn: The customer's event-level redaction hook
+
+    Returns:
+        The (possibly modified) event to keep processing, or None if the hook
+        dropped it.
+    """
+    from agentcat.types import Event as EventModel
+
+    run = _sync_event_redactor(redact_event_fn)
+    dumped = event.model_dump(
+        exclude={"redaction_fn", "event_redaction_fn"}, warnings=False
+    )
+    hook_input = EventModel(**dumped)
+
+    result = run(hook_input)
+
+    if result is None:
+        return None
+
+    restored = {field: getattr(event, field) for field in RESTORED_FIELDS}
+    updated = result.model_dump(warnings=False)
+    updated.update(restored)
+    redacted: UnredactedEvent = event.model_copy(update=updated)
     return redacted
