@@ -274,6 +274,120 @@ class TestEventQueue:
             assert "test-id" in log_message
             mock_send.assert_not_called()
 
+    @patch("agentcat.modules.event_queue.apply_event_redaction")
+    def test_process_event_with_event_redaction(self, mock_apply):
+        """Test processing event with the event-level redaction hook."""
+        eq = EventQueue()
+        mock_event_redaction_fn = MagicMock()
+
+        redacted_event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            resource_name="dropped-and-replaced",
+            event_redaction_fn=None,  # This should be cleared after redaction
+        )
+        mock_apply.return_value = redacted_event
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            resource_name="original",
+            event_redaction_fn=mock_event_redaction_fn,
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+            mock_apply.assert_called_once_with(event, mock_event_redaction_fn)
+            called_event = mock_send.call_args[0][0]
+            assert called_event.resource_name == "dropped-and-replaced"
+            assert called_event.event_redaction_fn is None
+            mock_send.assert_called_once()
+
+    def test_process_event_event_redaction_drops_event(self):
+        """A hook returning None drops the event before it's ever sent."""
+        eq = EventQueue()
+
+        def drop_it(event):
+            return None
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            event_redaction_fn=drop_it,
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+            mock_send.assert_not_called()
+
+    @patch("agentcat.modules.event_queue.apply_event_redaction")
+    @patch("agentcat.modules.event_queue.write_to_log")
+    def test_process_event_event_redaction_failure(self, mock_log, mock_apply):
+        """Test processing event when the event-level hook raises."""
+        eq = EventQueue()
+        mock_event_redaction_fn = MagicMock()
+        mock_apply.side_effect = Exception("Event redaction error")
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            event_redaction_fn=mock_event_redaction_fn,
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)
+
+            assert mock_log.called
+            log_message = str(mock_log.call_args_list[0])
+            assert "WARNING" in log_message
+            assert "event redaction failure" in log_message
+            assert "test-id" in log_message
+            mock_send.assert_not_called()
+
+    def test_process_event_event_hook_runs_before_string_hook(self):
+        """Ordering: the event hook must see raw values, before the string
+        hook ever runs — nothing mocked, both hooks wired for real."""
+        eq = EventQueue()
+        order = []
+
+        def event_hook(event):
+            order.append(("event_hook", event.parameters))
+            return event
+
+        def string_hook(s):
+            order.append(("string_hook", s))
+            return "[REDACTED]"
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            parameters={"secret": "raw-value"},
+            event_redaction_fn=event_hook,
+            redaction_fn=string_hook,
+        )
+
+        with patch.object(eq, "_send_event"):
+            eq._process_event(event)
+
+        assert order[0] == ("event_hook", {"secret": "raw-value"})
+        assert order[1] == ("string_hook", "raw-value")
+
     @patch("agentcat.modules.event_queue.generate_prefixed_ksuid")
     def test_process_event_without_id(self, mock_ksuid):
         """Test processing event without ID generates one."""
@@ -824,6 +938,27 @@ class TestPublishEvent:
         # Check event was added with redaction function
         added_event = mock_eq.add.call_args[0][0]
         assert added_event.redaction_fn == mock_redaction_fn
+
+    @patch("agentcat.modules.event_queue.get_server_tracking_data")
+    @patch("agentcat.modules.event_queue.event_queue")
+    def test_publish_event_with_event_redaction_function(self, mock_eq, mock_tracking):
+        """Test publishing event includes the event-level redaction hook."""
+        mock_server = MagicMock()
+        mock_event_redaction_fn = MagicMock()
+        mock_tracking.return_value = _tracking_data(
+            options=AgentCatOptions(redact_event=mock_event_redaction_fn)
+        )
+
+        event = UnredactedEvent(
+            event_type="mcp:tools/call",
+            session_id="ses_task_handle",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        publish_event(mock_server, event)
+
+        added_event = mock_eq.add.call_args[0][0]
+        assert added_event.event_redaction_fn == mock_event_redaction_fn
 
 
 def test_module_import_installs_no_process_hooks():

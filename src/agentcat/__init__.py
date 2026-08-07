@@ -25,6 +25,7 @@ from .types import (
     EventPropertiesFunction,
     EventTagsFunction,
     IdentifyFunction,
+    RedactEventFunction,
     RedactionFunction,
     ResolveSessionIdFunction,
     UnredactedEvent,
@@ -449,8 +450,9 @@ __all__ = [
     # Types for identify functionality
     "UserIdentity",
     "IdentifyFunction",
-    # Type for redaction functionality
+    # Types for redaction functionality
     "RedactionFunction",
+    "RedactEventFunction",
     # Types for event metadata callbacks
     "EventTagsFunction",
     "EventPropertiesFunction",

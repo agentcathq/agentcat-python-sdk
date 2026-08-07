@@ -26,7 +26,7 @@ from ..types import Event, UnredactedEvent
 from ..utils import generate_prefixed_ksuid, get_agentcat_version
 from .internal import get_server_tracking_data
 from .logging import write_to_log
-from .redaction import redact_event
+from .redaction import apply_event_redaction, redact_event
 from .sanitization import sanitize_event
 from .truncation import truncate_event
 
@@ -155,6 +155,27 @@ class EventQueue:
 
     def _process_event(self, event: UnredactedEvent) -> None:
         """Process a single event."""
+        if event and event.event_redaction_fn:
+            # Event-level redaction hook runs first, on raw values, and may
+            # drop the event entirely.
+            try:
+                if not event.id:
+                    event.id = generate_prefixed_ksuid(EVENT_ID_PREFIX)
+                redacted_event = apply_event_redaction(event, event.event_redaction_fn)
+                if redacted_event is None:
+                    write_to_log(f"Event {event.id} dropped by redact_event hook")
+                    return
+                event = redacted_event
+                event.event_redaction_fn = None  # Clear to avoid reprocessing
+            except (Exception, SystemExit) as error:
+                # SystemExit included: a customer hook calling sys.exit() must
+                # not kill the worker thread.
+                write_to_log(
+                    f"WARNING: Dropping event {event.id or 'unknown'} due to "
+                    f"event redaction failure: {error}"
+                )
+                return  # Skip this event if event redaction fails
+
         if event and event.redaction_fn:
             # Redact sensitive information if a redaction function is provided
             try:
@@ -394,6 +415,7 @@ def publish_event(server: Any, event: UnredactedEvent) -> None:
     full_event = UnredactedEvent(
         **stamped,
         redaction_fn=data.options.redact_sensitive_information,
+        event_redaction_fn=data.options.redact_event,
     )
 
     event_queue.add(full_event)

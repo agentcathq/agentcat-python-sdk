@@ -5,7 +5,9 @@ from typing import Any, Dict
 from agentcat.modules.redaction import (
     redact_strings_in_object,
     redact_event,
+    apply_event_redaction,
     PROTECTED_FIELDS,
+    RESTORED_FIELDS,
 )
 
 
@@ -418,7 +420,9 @@ class TestRedactEventOnTheRealEventModel:
         assert result.response == {
             "content": [{"type": "text", "text": "[REDACTED] answer"}]
         }
-        assert result.client_name == "[REDACTED] client"
+        # client_name is now a protected field (see PROTECTED_FIELDS) — it
+        # must survive untouched, same as the other protected fields below.
+        assert result.client_name == "SECRET client"
         # ...and the original is untouched, so a failure downstream cannot
         # publish a half-redacted object.
         assert event.parameters == {"arguments": {"text": "SECRET body"}}
@@ -433,6 +437,7 @@ class TestRedactEventOnTheRealEventModel:
         assert result.project_id == "proj_keepme"
         assert result.event_type == "mcp:tools/call"
         assert result.resource_name == "add_todo"
+        assert result.client_name == "SECRET client"
         assert result.identify_actor_given_id == "SECRET actor"
         assert result.identify_data == {"email": "SECRET@example.com"}
         assert result.tags == {"env": "SECRET tag"}
@@ -463,5 +468,127 @@ class TestRedactEventOnTheRealEventModel:
             return s.replace("SECRET", "[REDACTED]")
 
         result = redact_event(self._event(), redact_fn)
-        assert result.client_name == "[REDACTED] client"
+        assert result.user_intent == "find the [REDACTED]"
         assert "coroutine" not in result.model_dump_json()
+
+
+class TestApplyEventRedaction:
+    """Test suite for apply_event_redaction — the whole-event redaction hook.
+
+    Mirrors the TypeScript SDK's applyEventRedaction/redactEvent-option tests
+    and the Go SDK's ApplyEventRedaction tests, since this hook exists to
+    close a parity gap: Python previously had only the string-level
+    redact_sensitive_information hook.
+    """
+
+    @staticmethod
+    def _event(**overrides):
+        from agentcat.types import UnredactedEvent
+
+        fields = {
+            "session_id": "ses_keepme",
+            "id": "evt_keepme",
+            "project_id": "proj_keepme",
+            "event_type": "mcp:tools/call",
+            "resource_name": "get_credentials",
+            "user_intent": "raw intent",
+            "parameters": {"secret": "raw-value"},
+            "response": {"content": [{"type": "text", "text": "raw response"}]},
+        }
+        fields.update(overrides)
+        return UnredactedEvent(**fields)
+
+    def test_hook_sees_raw_unredacted_values(self):
+        seen = {}
+
+        def hook(event):
+            seen["parameters"] = event.parameters
+            seen["user_intent"] = event.user_intent
+            return event
+
+        apply_event_redaction(self._event(), hook)
+        assert seen["parameters"] == {"secret": "raw-value"}
+        assert seen["user_intent"] == "raw intent"
+
+    def test_hook_can_modify_the_event(self):
+        def hook(event):
+            event.response = None
+            return event
+
+        result = apply_event_redaction(self._event(), hook)
+        assert result is not None
+        assert result.response is None
+
+    def test_hook_returning_none_drops_the_event(self):
+        def drop_get_credentials(event):
+            if event.resource_name == "get_credentials":
+                return None
+            return event
+
+        result = apply_event_redaction(self._event(), drop_get_credentials)
+        assert result is None
+
+    def test_restored_fields_survive_forgery_attempts(self):
+        """A hook cannot forge or erase what AgentCat itself assigned."""
+
+        def forge(event):
+            event.id = "forged-id"
+            event.session_id = "forged-session"
+            event.project_id = "forged-project"
+            # A different but still-valid enum member, so the assignment
+            # itself doesn't raise before restoration gets a chance to run.
+            event.event_type = "agentcat:custom"
+            event.timestamp = None
+            return event
+
+        original = self._event()
+        result = apply_event_redaction(original, forge)
+
+        assert result.id == original.id
+        assert result.session_id == original.session_id
+        assert result.project_id == original.project_id
+        assert result.event_type == original.event_type
+        assert result.timestamp == original.timestamp
+        assert RESTORED_FIELDS == {
+            "id",
+            "session_id",
+            "project_id",
+            "event_type",
+            "timestamp",
+        }
+
+    def test_a_raising_hook_propagates_so_the_queue_drops_the_event(self):
+        def boom(_event):
+            raise RuntimeError("event redaction exploded")
+
+        with pytest.raises(RuntimeError, match="event redaction exploded"):
+            apply_event_redaction(self._event(), boom)
+
+    def test_an_async_hook_is_driven_to_completion(self):
+        async def hook(event):
+            event.user_intent = "async-modified"
+            return event
+
+        result = apply_event_redaction(self._event(), hook)
+        assert result.user_intent == "async-modified"
+
+    def test_hook_never_sees_the_function_fields(self):
+        seen = {}
+
+        def hook(event):
+            seen["has_redaction_fn"] = hasattr(event, "redaction_fn")
+            seen["has_event_redaction_fn"] = hasattr(event, "event_redaction_fn")
+            return event
+
+        event = self._event(redaction_fn=lambda s: s, event_redaction_fn=hook)
+        apply_event_redaction(event, hook)
+        assert seen["has_redaction_fn"] is False
+        assert seen["has_event_redaction_fn"] is False
+
+    def test_result_preserves_redaction_fn_for_the_string_hook_to_run_next(self):
+        def string_redact_fn(s):
+            return "[REDACTED]"
+
+        event = self._event(redaction_fn=string_redact_fn)
+        result = apply_event_redaction(event, lambda e: e)
+        assert result.redaction_fn is string_redact_fn

@@ -143,6 +143,23 @@ async def redact(text: str) -> str:
 agentcat.track(server, "proj_0000000", AgentCatOptions(redact_sensitive_information=redact))
 ```
 
+For redaction decisions that need more context than a single string — such as which tool was called or what type of event is being published — use the event-level `redact_event` hook. It receives the full event and returns a modified event, or `None` to drop the event entirely. It may be sync or async, runs before `redact_sensitive_information` (so it sees raw values), and can be combined with it.
+
+```python
+from agentcat import AgentCatOptions
+
+def redact_event(event):
+    # Drop events from tools that handle secrets entirely
+    if event.resource_name == "get_credentials":
+        return None
+    # Strip response payloads from a specific tool
+    if event.resource_name == "export_report":
+        event.response = None
+    return event
+
+agentcat.track(server, "proj_0000000", AgentCatOptions(redact_event=redact_event))
+```
+
 ### Vendor Support
 
 AgentCat seamlessly integrates with your existing observability stack, providing automatic logging and tracing without the tedious setup typically required. Export telemetry data to multiple platforms simultaneously:
