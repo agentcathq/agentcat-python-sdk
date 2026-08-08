@@ -1,6 +1,7 @@
 """Test event queue functionality."""
 
 import queue
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -287,7 +288,13 @@ class TestEventQueue:
             session_id="session-123",
             timestamp=datetime.now(timezone.utc),
             resource_name="dropped-and-replaced",
-            event_redaction_fn=None,  # This should be cleared after redaction
+            # A real (unmocked) apply_event_redaction preserves the original
+            # hook on its returned copy — model_copy(update=...) never
+            # touches event_redaction_fn, since it's excluded from the dump
+            # and isn't in RESTORED_FIELDS. Mirroring that here means the
+            # `is None` assertion below actually exercises _process_event's
+            # own clearing line rather than just echoing the fixture.
+            event_redaction_fn=mock_event_redaction_fn,
         )
         mock_apply.return_value = redacted_event
 
@@ -355,6 +362,29 @@ class TestEventQueue:
             assert "WARNING" in log_message
             assert "event redaction failure" in log_message
             assert "test-id" in log_message
+            mock_send.assert_not_called()
+
+    def test_process_event_event_redaction_hook_sys_exit_does_not_kill_worker(self):
+        """A redact_event hook calling sys.exit() must not propagate out of
+        _process_event — SystemExit doesn't subclass Exception, so it needs
+        its own except clause, and _worker's own `except Exception` wrapper
+        would not have caught it either."""
+        eq = EventQueue()
+
+        def exits(event):
+            sys.exit(1)
+
+        event = UnredactedEvent(
+            id="test-id",
+            event_type="mcp:tools/call",
+            project_id="project-123",
+            session_id="session-123",
+            timestamp=datetime.now(timezone.utc),
+            event_redaction_fn=exits,
+        )
+
+        with patch.object(eq, "_send_event") as mock_send:
+            eq._process_event(event)  # must not raise SystemExit
             mock_send.assert_not_called()
 
     def test_process_event_event_hook_runs_before_string_hook(self):

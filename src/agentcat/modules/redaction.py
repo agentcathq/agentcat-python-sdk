@@ -1,5 +1,6 @@
 """PII redaction for AgentCat logs."""
 
+import copy
 from typing import Any, TYPE_CHECKING, Callable, Set
 
 from agentcat.modules.hooks import drive_hook_result
@@ -178,7 +179,8 @@ def _sync_event_redactor(
 # not consumer-settable. Broader than the equivalent RESTORED_FIELDS in the
 # TypeScript SDK and the snapshot/restore around ApplyEventRedaction in the Go
 # SDK, which cover only id/session_id/project_id/event_type/timestamp and so
-# still let a hook forge or erase actor identity, tags, and properties.
+# still let a hook forge or erase actor identity, client/server identity,
+# tags, and properties.
 RESTORED_FIELDS: Set[str] = {
     "id",
     "session_id",
@@ -191,6 +193,10 @@ RESTORED_FIELDS: Set[str] = {
     "identify_data",
     "tags",
     "properties",
+    "client_name",
+    "client_version",
+    "server_name",
+    "server_version",
 }
 
 
@@ -246,7 +252,13 @@ def apply_event_redaction(
     if result is None:
         return None
 
-    restored = {field: getattr(event, field) for field in RESTORED_FIELDS}
+    # Deep-copied, not aliased: tags/properties/identify_data are mutable, and
+    # a customer callback commonly hands back the same cached dict across
+    # events — aliasing here would let mutating one event's dict silently
+    # corrupt another event that shares the reference.
+    restored = {
+        field: copy.deepcopy(getattr(event, field)) for field in RESTORED_FIELDS
+    }
     updated = result.model_dump(warnings=False)
     updated.update(restored)
     redacted: UnredactedEvent = event.model_copy(update=updated)

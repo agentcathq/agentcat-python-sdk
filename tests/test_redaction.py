@@ -2,6 +2,7 @@
 
 import pytest
 from typing import Any, Dict
+from unittest.mock import patch
 from agentcat.modules.redaction import (
     redact_strings_in_object,
     redact_event,
@@ -400,6 +401,9 @@ class TestRedactEventOnTheRealEventModel:
             "parameters": {"arguments": {"text": "SECRET body"}},
             "response": {"content": [{"type": "text", "text": "SECRET answer"}]},
             "client_name": "SECRET client",
+            "client_version": "SECRET client version",
+            "server_name": "SECRET server",
+            "server_version": "SECRET server version",
             "identify_actor_given_id": "SECRET actor",
             "identify_data": {"email": "SECRET@example.com"},
             "tags": {"env": "SECRET tag"},
@@ -420,9 +424,13 @@ class TestRedactEventOnTheRealEventModel:
         assert result.response == {
             "content": [{"type": "text", "text": "[REDACTED] answer"}]
         }
-        # client_name is now a protected field (see PROTECTED_FIELDS) — it
-        # must survive untouched, same as the other protected fields below.
+        # client/server identity fields are protected (see PROTECTED_FIELDS)
+        # — they must survive untouched, same as the other protected fields
+        # below.
         assert result.client_name == "SECRET client"
+        assert result.client_version == "SECRET client version"
+        assert result.server_name == "SECRET server"
+        assert result.server_version == "SECRET server version"
         # ...and the original is untouched, so a failure downstream cannot
         # publish a half-redacted object.
         assert event.parameters == {"arguments": {"text": "SECRET body"}}
@@ -438,6 +446,9 @@ class TestRedactEventOnTheRealEventModel:
         assert result.event_type == "mcp:tools/call"
         assert result.resource_name == "add_todo"
         assert result.client_name == "SECRET client"
+        assert result.client_version == "SECRET client version"
+        assert result.server_name == "SECRET server"
+        assert result.server_version == "SECRET server version"
         assert result.identify_actor_given_id == "SECRET actor"
         assert result.identify_data == {"email": "SECRET@example.com"}
         assert result.tags == {"env": "SECRET tag"}
@@ -519,6 +530,24 @@ class TestApplyEventRedaction:
         assert result is not None
         assert result.response is None
 
+    def test_apply_event_redaction_leaves_the_original_event_unmutated(self):
+        """The hook must be handed a copy, never the caller's own object —
+        the publish worker (and any other in-flight reference) still holds
+        the original, so a hook that mutates the event it receives (as in
+        test_hook_can_modify_the_event above) must not leave that mutation
+        visible there."""
+
+        def hook(event):
+            event.response = None
+            return event
+
+        original = self._event()
+        apply_event_redaction(original, hook)
+
+        assert original.response == {
+            "content": [{"type": "text", "text": "raw response"}]
+        }
+
     def test_hook_returning_none_drops_the_event(self):
         def drop_get_credentials(event):
             if event.resource_name == "get_credentials":
@@ -561,6 +590,10 @@ class TestApplyEventRedaction:
             "identify_data",
             "tags",
             "properties",
+            "client_name",
+            "client_version",
+            "server_name",
+            "server_version",
         }
 
     def test_restored_fields_survive_actor_and_tag_forgery(self):
@@ -593,12 +626,96 @@ class TestApplyEventRedaction:
         assert result.tags == original.tags
         assert result.properties == original.properties
 
+    def test_restored_fields_survive_client_and_server_forgery(self):
+        """A hook cannot reassign which MCP client/server an event came from."""
+
+        def forge(event):
+            event.client_name = "forged-client"
+            event.client_version = "0.0.0-forged"
+            event.server_name = "forged-server"
+            event.server_version = "0.0.0-forged"
+            return event
+
+        original = self._event(
+            client_name="real-client",
+            client_version="1.2.3",
+            server_name="real-server",
+            server_version="4.5.6",
+        )
+        result = apply_event_redaction(original, forge)
+
+        assert result.client_name == original.client_name
+        assert result.client_version == original.client_version
+        assert result.server_name == original.server_name
+        assert result.server_version == original.server_version
+
+    def test_restored_dict_fields_are_copied_not_aliased(self):
+        """The restored tags/properties/identify_data must be independent
+        copies — mutating the result must not corrupt the original event a
+        publish worker or another in-flight event may still hold."""
+
+        original = self._event(
+            tags={"env": "prod"},
+            properties={"plan": "premium"},
+            identify_data={"email": "real@example.com"},
+        )
+        result = apply_event_redaction(original, lambda event: event)
+
+        assert result.tags is not original.tags
+        assert result.properties is not original.properties
+        assert result.identify_data is not original.identify_data
+
+        result.tags["env"] = "MUTATED"
+        result.properties["plan"] = "MUTATED"
+        result.identify_data["email"] = "MUTATED"
+
+        assert original.tags == {"env": "prod"}
+        assert original.properties == {"plan": "premium"}
+        assert original.identify_data == {"email": "real@example.com"}
+
     def test_a_raising_hook_propagates_so_the_queue_drops_the_event(self):
         def boom(_event):
             raise RuntimeError("event redaction exploded")
 
         with pytest.raises(RuntimeError, match="event redaction exploded"):
             apply_event_redaction(self._event(), boom)
+
+    def test_hook_returning_a_non_event_value_raises(self):
+        """Documented fail-loud contract (see apply_event_redaction's and
+        RedactEventFunction's docstrings): the pydantic-Event return type is
+        enforced by type hints only, not at runtime, so a hook that ignores
+        its type hint and returns a plain dict must raise rather than
+        silently degrade to some fallback behavior."""
+
+        def hook(event):
+            return {**event.model_dump(), "response": None}
+
+        with pytest.raises(AttributeError):
+            apply_event_redaction(self._event(), hook)
+
+    def test_hook_returning_a_fresh_partial_event_nulls_unset_fields(self):
+        """Documented footgun (see apply_event_redaction's docstring): the
+        hook's return value replaces the event's fields wholesale — a full
+        model_dump(), not a diff against the original — so a hook that
+        returns a freshly-built Event with only some fields set, instead of
+        mutating and returning the one it was handed, silently nulls out
+        everything it didn't set."""
+        from agentcat.types import Event as EventModel
+
+        def hook(event):
+            return EventModel(
+                event_type=event.event_type, resource_name=event.resource_name
+            )
+
+        original = self._event()
+        result = apply_event_redaction(original, hook)
+
+        assert result.resource_name == original.resource_name
+        assert result.user_intent is None
+        assert result.parameters is None
+        assert result.response is None
+        # ...while the original the hook was handed a dump of is untouched.
+        assert original.user_intent == "raw intent"
 
     def test_an_async_hook_is_driven_to_completion(self):
         async def hook(event):
@@ -608,18 +725,43 @@ class TestApplyEventRedaction:
         result = apply_event_redaction(self._event(), hook)
         assert result.user_intent == "async-modified"
 
+    def test_an_async_hook_resolving_to_none_drops_the_event(self):
+        """The None-drop check must run against the AWAITED result, not the
+        coroutine object drive_hook_result is handed — a coroutine is always
+        truthy, so a check performed before awaiting would never drop."""
+
+        async def drop_it(event):
+            return None
+
+        result = apply_event_redaction(self._event(), drop_it)
+        assert result is None
+
     def test_hook_never_sees_the_function_fields(self):
+        """`Event` never declares redaction_fn/event_redaction_fn at all, so
+        `hasattr` on the hook's input is True regardless of whether
+        apply_event_redaction actually excludes them from the dump — it
+        would read False even if the exclusion were deleted. Patch in
+        `UnredactedEvent` (which DOES declare those fields) as the hook's
+        input type instead, so a real callable surviving the dump shows up
+        as a non-None attribute rather than a silently-absent one."""
+        import agentcat.types as types_module
+
         seen = {}
 
         def hook(event):
-            seen["has_redaction_fn"] = hasattr(event, "redaction_fn")
-            seen["has_event_redaction_fn"] = hasattr(event, "event_redaction_fn")
+            seen["redaction_fn"] = getattr(event, "redaction_fn", "MISSING")
+            seen["event_redaction_fn"] = getattr(
+                event, "event_redaction_fn", "MISSING"
+            )
             return event
 
         event = self._event(redaction_fn=lambda s: s, event_redaction_fn=hook)
-        apply_event_redaction(event, hook)
-        assert seen["has_redaction_fn"] is False
-        assert seen["has_event_redaction_fn"] is False
+
+        with patch.object(types_module, "Event", types_module.UnredactedEvent):
+            apply_event_redaction(event, hook)
+
+        assert seen["redaction_fn"] is None
+        assert seen["event_redaction_fn"] is None
 
     def test_result_preserves_redaction_fn_for_the_string_hook_to_run_next(self):
         def string_redact_fn(s):
