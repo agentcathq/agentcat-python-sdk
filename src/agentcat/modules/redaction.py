@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING, Callable, Set
 from agentcat.modules.hooks import drive_hook_result
 
 if TYPE_CHECKING:
-    from agentcat.types import Event, UnredactedEvent
+    from agentcat.types import Event, RedactEventFunction, UnredactedEvent
 
 
 # Set of field names that should be protected from redaction.
@@ -158,8 +158,8 @@ def redact_event(event: "UnredactedEvent", redact_fn: Callable[[str], str]) -> "
 
 
 def _sync_event_redactor(
-    redact_event_fn: Callable[["Event"], Any],
-) -> Callable[["Event"], Any]:
+    redact_event_fn: "RedactEventFunction",
+) -> Callable[["Event"], "Event | None"]:
     """A synchronous view of the customer's event-level redaction hook.
 
     Same rationale as `_sync_redactor`: the publish worker is a thread with no
@@ -167,7 +167,7 @@ def _sync_event_redactor(
     completion here rather than assigned straight into the pipeline.
     """
 
-    def run(event: "Event") -> Any:
+    def run(event: "Event") -> "Event | None":
         return drive_hook_result(redact_event_fn(event), "redact_event")
 
     return run
@@ -175,20 +175,28 @@ def _sync_event_redactor(
 
 # Fields restored from the original event after the event-level redaction
 # hook runs, regardless of what the hook returns. These are system-managed —
-# not consumer-settable — mirroring RESTORED_FIELDS in the TypeScript SDK and
-# the equivalent snapshot/restore around ApplyEventRedaction in the Go SDK.
+# not consumer-settable. Broader than the equivalent RESTORED_FIELDS in the
+# TypeScript SDK and the snapshot/restore around ApplyEventRedaction in the Go
+# SDK, which cover only id/session_id/project_id/event_type/timestamp and so
+# still let a hook forge or erase actor identity, tags, and properties.
 RESTORED_FIELDS: Set[str] = {
     "id",
     "session_id",
     "project_id",
     "event_type",
     "timestamp",
+    "actor_id",
+    "identify_actor_given_id",
+    "identify_actor_name",
+    "identify_data",
+    "tags",
+    "properties",
 }
 
 
 def apply_event_redaction(
     event: "UnredactedEvent",
-    redact_event_fn: Callable[["Event"], Any],
+    redact_event_fn: "RedactEventFunction",
 ) -> "UnredactedEvent | None":
     """
     Applies the customer's event-level redaction hook to an event.
@@ -198,6 +206,20 @@ def apply_event_redaction(
     drop the event entirely. System-managed fields (RESTORED_FIELDS) are
     force-restored from the original event afterward, so a hook cannot forge
     or erase what AgentCat itself assigned.
+
+    `RedactEventFunction` (see types.py) declares the hook returns a pydantic
+    `Event | None` — mutate and return the `Event` you were handed, not a
+    different object. That contract is enforced by type hints only, not at
+    runtime: `redact_event_fn` is called and its result is trusted to be
+    `Event`-shaped, so a hook that ignores its type hints and returns
+    something else (e.g. a plain dict) raises `AttributeError` here rather
+    than degrading gracefully. Type-check hooks against `RedactEventFunction`
+    (mypy/pyright) to catch this before it ships.
+
+    The return value is also applied as a wholesale replacement of the
+    event's fields (`result.model_dump()`, not a diff against the original),
+    so a freshly-built or partial `Event` — even though it satisfies the type
+    hint — will silently null out every field the hook didn't set.
 
     The hook is handed a plain `Event` built from the dump, excluding
     `redaction_fn`/`event_redaction_fn` — they are machinery, not event data,

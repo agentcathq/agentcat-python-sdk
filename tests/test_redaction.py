@@ -555,7 +555,43 @@ class TestApplyEventRedaction:
             "project_id",
             "event_type",
             "timestamp",
+            "actor_id",
+            "identify_actor_given_id",
+            "identify_actor_name",
+            "identify_data",
+            "tags",
+            "properties",
         }
+
+    def test_restored_fields_survive_actor_and_tag_forgery(self):
+        """A hook cannot reassign the Actor an event is attributed to, or
+        forge the tags/properties a customer's own callbacks attached."""
+
+        def forge(event):
+            event.actor_id = "actor_forged"
+            event.identify_actor_given_id = "forged-actor"
+            event.identify_actor_name = "Forged Actor"
+            event.identify_data = {"email": "attacker@evil.com"}
+            event.tags = {"env": "forged"}
+            event.properties = {"forged": True}
+            return event
+
+        original = self._event(
+            actor_id="actor_real",
+            identify_actor_given_id="real-actor-42",
+            identify_actor_name="Real Actor",
+            identify_data={"email": "real@example.com"},
+            tags={"env": "prod"},
+            properties={"real": True},
+        )
+        result = apply_event_redaction(original, forge)
+
+        assert result.actor_id == original.actor_id
+        assert result.identify_actor_given_id == original.identify_actor_given_id
+        assert result.identify_actor_name == original.identify_actor_name
+        assert result.identify_data == original.identify_data
+        assert result.tags == original.tags
+        assert result.properties == original.properties
 
     def test_a_raising_hook_propagates_so_the_queue_drops_the_event(self):
         def boom(_event):

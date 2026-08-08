@@ -47,6 +47,12 @@ class _Stop:
 _STOP = _Stop()
 
 
+def _ensure_event_id(event: UnredactedEvent) -> None:
+    """Assign a ksuid if the event doesn't already have one."""
+    if not event.id:
+        event.id = generate_prefixed_ksuid(EVENT_ID_PREFIX)
+
+
 class EventQueue:
     """Manages event queue and sending to AgentCat API."""
 
@@ -159,8 +165,7 @@ class EventQueue:
             # Event-level redaction hook runs first, on raw values, and may
             # drop the event entirely.
             try:
-                if not event.id:
-                    event.id = generate_prefixed_ksuid(EVENT_ID_PREFIX)
+                _ensure_event_id(event)
                 redacted_event = apply_event_redaction(event, event.event_redaction_fn)
                 if redacted_event is None:
                     write_to_log(f"Event {event.id} dropped by redact_event hook")
@@ -179,8 +184,7 @@ class EventQueue:
         if event and event.redaction_fn:
             # Redact sensitive information if a redaction function is provided
             try:
-                if not event.id:
-                    event.id = generate_prefixed_ksuid(EVENT_ID_PREFIX)
+                _ensure_event_id(event)
                 redacted_event = redact_event(event, event.redaction_fn)
                 # The redacted event is already the full event object, not a dict
                 event = redacted_event
@@ -207,7 +211,7 @@ class EventQueue:
             )
 
         if event:
-            event.id = event.id or generate_prefixed_ksuid("evt")
+            _ensure_event_id(event)
 
             # Send to AgentCat API only if project_id exists
             if event.project_id:

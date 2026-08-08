@@ -39,9 +39,17 @@ IdentifyFunction = Callable[
 # Type alias for redaction function
 RedactionFunction = Callable[[str], str | Awaitable[str]]
 # Type alias for the event-level redaction hook. Receives the full event
-# (raw, unredacted values — it runs before RedactionFunction) and returns a
-# modified event, or None to drop the event entirely. Accepts sync or async
-# callables (mirrors RedactionFunction).
+# (raw, unredacted values — it runs before RedactionFunction) and MUST return
+# a pydantic Event or None to drop the event entirely — never a dict or other
+# object, even though one might satisfy a looser hand-written signature. This
+# is enforced by type checking only: type-check hooks against
+# RedactEventFunction (mypy/pyright), since a hook that returns something
+# else at runtime fails inside apply_event_redaction rather than degrading
+# gracefully. Accepts sync or async callables (mirrors RedactionFunction).
+# Mutate and return the event you're handed — the return value replaces the
+# event's fields wholesale, not a diff, so a freshly-built or partial event
+# silently loses every field it didn't set. See the redact_event option on
+# AgentCatOptions for the full contract.
 RedactEventFunction = Callable[
     ["Event"], Optional["Event"] | Awaitable[Optional["Event"]]
 ]
@@ -213,10 +221,15 @@ class AgentCatOptions:
     # Event-level redaction hook, invoked with the full event (raw, unredacted
     # values) before redact_sensitive_information runs. May return a modified
     # event, or None to drop the event entirely. May be sync or async. The
-    # system-managed fields id, session_id, project_id, event_type, and
-    # timestamp cannot be changed by this hook — they are restored from the
-    # original event afterward. If the hook raises (or times out), the event
-    # is dropped rather than published unredacted.
+    # system-managed fields id, session_id, project_id, event_type,
+    # timestamp, actor_id, identify_actor_given_id, identify_actor_name,
+    # identify_data, tags, and properties cannot be changed by this hook —
+    # they are restored from the original event afterward. If the hook
+    # raises, the event is dropped rather than published unredacted.
+    # Mutate and return the event you're given rather than constructing a new
+    # one: the return value replaces the event's fields wholesale (it is not
+    # diffed against the original), so a freshly-built or partial event
+    # silently drops everything you didn't set.
     redact_event: RedactEventFunction | None = None
     exporters: dict[str, ExporterConfig] | None = None
     # Debug logging to ~/agentcat.log. Tri-state: None (the default) defers to
