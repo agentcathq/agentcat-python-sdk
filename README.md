@@ -145,6 +145,8 @@ agentcat.track(server, "proj_0000000", AgentCatOptions(redact_sensitive_informat
 
 For redaction decisions that need more context than a single string — such as which tool was called or what type of event is being published — use the event-level `redact_event` hook. It receives the full event and returns a modified event, or `None` to drop the event entirely. It may be sync or async, runs before `redact_sensitive_information` (so it sees raw values), and can be combined with it.
 
+Mutate the event you're given and return it, as in the example below — don't construct or return a different `Event`. The return value replaces the event's fields wholesale, not as a diff against the original, so returning a partial or freshly-built event will silently drop every field you didn't set.
+
 ```python
 from agentcat import AgentCatOptions
 
