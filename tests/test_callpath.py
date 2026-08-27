@@ -95,30 +95,34 @@ def test_decorate_content_only_when_minted_prompted():
     minted = HandleResolution(sid("T"), "minted")
     out = decorate_content([{"type": "text", "text": "x"}], minted, text_block)
     assert out is not None
-    assert "[MCP INSTRUCTIONS]: session_id issued." in out[-1]["text"]
+    assert out[0]["text"].startswith("[session_id issued")
     assert decorate_content([{"t": 1}], HandleResolution(sid("T"), "supplied"), dict) is None  # noqa: E501
     assert decorate_content([{"t": 1}], HandleResolution(sid("T"), "minted", hook_mode=True), dict) is None  # noqa: E501
     assert decorate_content("not-a-list", minted, dict) is None
 
 
-# §3.4a: the appended text carries the id the agent must echo, built by the one
-# source of truth (handles.build_mint_back_text) rather than re-derived here.
-def test_decorate_content_appends_the_minted_id():
-    out = decorate_content([], HandleResolution(sid("ABC"), "minted"), text_block)
-    assert out is not None and len(out) == 1
-    assert "session_id=ses_ABC" in out[0]["text"]
-    assert out[0]["text"].endswith(
-        "Without session_id, this server does not function as intended."
+# §3.4a: the prepended text carries the id the agent must echo, built by the
+# one source of truth (handles.build_mint_back_text) rather than re-derived
+# here. It is the FIRST content element, where client-side truncation of long
+# results cannot reach it.
+def test_decorate_content_prepends_the_minted_id():
+    out = decorate_content(
+        [{"type": "text", "text": "payload"}],
+        HandleResolution(sid("ABC"), "minted"),
+        text_block,
     )
+    assert out is not None and len(out) == 2
+    assert "session_id: ses_ABC" in out[0]["text"]
+    assert out[1] == {"type": "text", "text": "payload"}
 
 
-# §3.4a: "Append it to error results too" — decorate_content never inspects
-# error state, so an isError result decorates on exactly the same terms.
+# §3.4a: error results decorate too — decorate_content never inspects error
+# state, so an isError result decorates on exactly the same terms.
 def test_decorate_content_ignores_error_state():
     error_content = [{"type": "text", "text": "boom: tool failed"}]
     out = decorate_content(error_content, HandleResolution(sid("T"), "minted"), text_block)  # noqa: E501
     assert out is not None and len(out) == 2
-    assert "[MCP INSTRUCTIONS]" in out[-1]["text"]
+    assert out[0]["text"].startswith("[session_id issued")
 
 
 # Never mutate the customer's result: the returned list is new and the
@@ -143,7 +147,9 @@ def test_structured_mirror_gate_matrix():
     mirrored = structured_mirror({"ok": True}, res, "search", {"search"})
     assert mirrored is not None
     assert mirrored["ok"] is True
-    assert mirrored["_mcp_instructions"]["session_id"] == sid("T")
+    assert mirrored["mcp_session"]["session_id"] == sid("T")
+    # Mirror inserted as the FIRST key of structuredContent.
+    assert list(mirrored) == ["mcp_session", "ok"]
     # Registry exists but this tool is not in it: mirroring would fail the
     # customer's own schema validation.
     assert structured_mirror({"ok": True}, res, "other", {"search"}) is None
@@ -160,7 +166,7 @@ def test_structured_mirror_delegates_shape_rules():
     assert structured_mirror(["a"], res, "search", None) is None
     assert structured_mirror("str", res, "search", None) is None
     # Customer data under the key wins.
-    assert structured_mirror({"_mcp_instructions": "mine"}, res, "search", None) is None
+    assert structured_mirror({"mcp_session": "mine"}, res, "search", None) is None
 
 
 def test_structured_mirror_hook_mode_without_agent_has_nothing_to_mirror():
@@ -172,8 +178,7 @@ def test_structured_mirror_hook_mode_without_agent_has_nothing_to_mirror():
     )
     mirrored = structured_mirror({"ok": True}, with_agent, "search", None)
     assert mirrored is not None
-    assert "session_id" not in mirrored["_mcp_instructions"]
-    assert mirrored["_mcp_instructions"]["agent_id"] == "agt|x|1"
+    assert mirrored["mcp_session"] == {"agent_id": "agt|x|1"}
 
 
 # ── get_stripped_arguments ───────────────────────────────────────────────────

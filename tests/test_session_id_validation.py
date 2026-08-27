@@ -26,8 +26,8 @@ import pytest
 from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
-    MINT_BACK_HEADER_INVALID,
-    MINT_BACK_HEADER_SESSION,
+    MINT_BACK_HEADER_ISSUED,
+    MINT_BACK_HEADER_UNRECOGNIZED,
     SESSION_ID_PARAM,
 )
 from agentcat.modules.handles import (
@@ -89,9 +89,13 @@ def test_rejects_anything_this_sdk_did_not_issue(label, value):
 #
 # | args.session_id | ours? | shape   | Event.session_id | source   |
 # | absent          | yes   | —       | new_session_id() | minted   |
+# | "start" (ci)    | yes   | —       | new_session_id() | minted   |
 # | present         | yes   | valid   | verbatim         | supplied |
 # | present         | yes   | invalid | "" (sessionless) | invalid  |
 # | present/absent  | no    | —       | "" (sessionless) | foreign  |
+#
+# The `start` sentinel row is checked before shape validation, on the trimmed
+# value, case-insensitively — and only where the parameter is OURS.
 
 
 async def _resolve(arguments, *, ours=True, **options):
@@ -108,6 +112,18 @@ async def _resolve(arguments, *, ours=True, **options):
 
 async def test_absent_and_ours_mints():
     r = await _resolve({})
+    assert r.session_source == "minted"
+    assert is_valid_session_id(r.session_id)
+
+
+@pytest.mark.parametrize("value", ["start", "Start", "START", "  start  ", " StArT\t"])
+async def test_the_start_sentinel_and_ours_mints(value):
+    """`start` resolves exactly like an omitted session_id: minted, issued.
+
+    Case variants and padded whitespace all count — resolution is lenient even
+    though the schema pattern only names the lowercase spelling.
+    """
+    r = await _resolve({SESSION_ID_PARAM: value})
     assert r.session_source == "minted"
     assert is_valid_session_id(r.session_id)
 
@@ -136,7 +152,16 @@ async def test_the_rejected_value_is_never_stored_anywhere():
     assert secret not in str(build_structured_mint_back(r))
 
 
-@pytest.mark.parametrize("arguments", [{}, {SESSION_ID_PARAM: "customer-value"}])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {SESSION_ID_PARAM: "customer-value"},
+        # `start` included: a customer-owned value is never read as the
+        # sentinel, so it cannot trigger a mint on a foreign parameter.
+        {SESSION_ID_PARAM: "start"},
+    ],
+)
 async def test_a_foreign_param_is_sessionless_whatever_the_agent_sent(arguments):
     r = await _resolve(arguments, ours=False)
     assert (r.session_source, r.session_id) == ("foreign", "")
@@ -164,7 +189,8 @@ async def test_a_missing_registry_still_validates():
     Nothing is in `declared_session_params` yet, so the tool counts as ours
     and the value is validated rather than adopted. A customer's foreign value
     in that window degrades to `invalid` instead of `foreign` — both
-    sessionless, only the tag differs.
+    sessionless, only the tag differs (a value spelling `start` instead
+    mints, exactly as on a parameter we injected).
     """
     r = await _resolve({SESSION_ID_PARAM: "TICKET-77"})
     assert (r.session_source, r.session_id) == ("invalid", "")
@@ -176,28 +202,26 @@ async def test_a_missing_registry_still_validates():
 async def test_invalid_corrects_the_agent_without_issuing_a_replacement():
     r = await _resolve({SESSION_ID_PARAM: "nope"})
     text = build_mint_back_text(r)
-    assert text.startswith(MINT_BACK_HEADER_INVALID)
-    assert "Re-send the exact session_id" in text
-    assert "omit the parameter and one will be issued" in text
+    assert text.startswith(MINT_BACK_HEADER_UNRECOGNIZED)
+    assert "Re-send the session_id issued earlier" in text
+    assert "send start and one will be issued" in text
     # Nothing that looks like an issued ID appears — this branch corrects, it
     # does not mint. Handing out a second ID would split a session that was
     # never split.
     assert "ses_" not in text
-    assert MINT_BACK_HEADER_SESSION not in text
+    assert MINT_BACK_HEADER_ISSUED not in text
 
 
-async def test_invalid_mirror_carries_instructions_but_no_session_id():
-    """The regression `not names: return None` would cause.
+async def test_invalid_mirror_reports_unrecognized_without_a_session_id():
+    """The one branch with something to say and nothing to echo.
 
-    With no agent_id in play there is nothing echoable, so the old early
-    return dropped the correction entirely — the one branch that has something
-    to say and nothing to confirm.
+    With no agent_id in play there is nothing echoable, but the response must
+    still report the rejection — `status` carries it, and no session_id is
+    named (no replacement is issued).
     """
     r = await _resolve({SESSION_ID_PARAM: "nope"})
     mint = build_structured_mint_back(r)
-    assert mint is not None
-    assert SESSION_ID_PARAM not in mint
-    assert "not recognized" in mint["instructions"]
+    assert mint == {"status": "unrecognized"}
 
 
 async def test_foreign_says_nothing_about_session_id_at_all():
@@ -209,9 +233,8 @@ async def test_foreign_says_nothing_about_session_id_at_all():
 async def test_foreign_never_confirms_a_value_agentcat_did_not_issue():
     """The confirmation loop, pinned.
 
-    The bug was `mint_back_confirmed` telling the agent its own
-    customer-semantics value was "confirmed. Keep sending this exact value on
-    every call."
+    The bug was the mirror echoing the agent's own customer-semantics value
+    back as an AgentCat handle to keep sending.
     """
     r = await _resolve(
         {SESSION_ID_PARAM: "customer-value", "agent_id": "opus|cc|k3n9x"},
@@ -220,14 +243,9 @@ async def test_foreign_never_confirms_a_value_agentcat_did_not_issue():
     )
     mint = build_structured_mint_back(r)
     # agent_id is a separate injection and still landed, so it is still ours
-    # to confirm — suppression is per handle, not per response.
-    assert mint == {
-        "agent_id": "opus|cc|k3n9x",
-        "instructions": (
-            "[MCP INSTRUCTIONS]: agent_id confirmed. "
-            "Keep sending this exact value on every call."
-        ),
-    }
+    # to mirror — suppression is per handle, not per response. No status
+    # either: that vocabulary belongs to the session parameter AgentCat owns.
+    assert mint == {"agent_id": "opus|cc|k3n9x"}
     assert "customer-value" not in str(mint)
 
 
@@ -366,7 +384,7 @@ async def test_an_invalid_id_publishes_sessionless_and_corrects_the_agent(
             client, "echo", {"text": "hi", SESSION_ID_PARAM: "not-a-real-id"}
         )
 
-    assert "session_id not recognized" in result.text
+    assert "[session_id unrecognized" in result.text
     assert "not-a-real-id" not in result.text
 
     (event,) = capture
@@ -378,16 +396,23 @@ async def test_an_invalid_id_publishes_sessionless_and_corrects_the_agent(
     assert event.parameters["arguments"][SESSION_ID_PARAM] == "not-a-real-id"
 
 
+@pytest.mark.parametrize(
+    "recovery_args",
+    [
+        {"text": "b", SESSION_ID_PARAM: "start"},
+        {"text": "b"},
+    ],
+    ids=["sends-start", "omits-the-parameter"],
+)
 @pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
-async def test_the_correction_lets_an_agent_recover_by_omitting_the_parameter(
-    flavor, capture
-):
+async def test_the_correction_lets_an_agent_recover(flavor, capture, recovery_args):
     """The deadlock the closing sentence of the copy exists to prevent.
 
     An agent that hallucinates a session_id on its FIRST call was never issued
-    one, so "re-send what you were given" names nothing. Omitting the
-    parameter has to put it back on the minting path — otherwise the
-    conversation can never acquire a session at all.
+    one, so "re-send what you were given" names nothing. Sending `start` — the
+    recovery the copy names — has to put it back on the minting path, and an
+    omitted parameter still mints too: a stale schema or scripted caller must
+    never be locked out of acquiring a session.
     """
     built = flavor.build("invalid-recovery")
     track(built.server, "proj_test", AgentCatOptions())
@@ -395,10 +420,10 @@ async def test_the_correction_lets_an_agent_recover_by_omitting_the_parameter(
     async with flavor.client(built.server) as client:
         await flavor.list_tools(client)
         await flavor.call(client, "echo", {"text": "a", SESSION_ID_PARAM: "guessed"})
-        recovered = await flavor.call(client, "echo", {"text": "b"})
+        recovered = await flavor.call(client, "echo", recovery_args)
 
-    assert MINT_BACK_HEADER_SESSION in recovered.text
-    issued = recovered.structured["_mcp_instructions"][SESSION_ID_PARAM]
+    assert MINT_BACK_HEADER_ISSUED in recovered.text
+    issued = recovered.structured["mcp_session"][SESSION_ID_PARAM]
     assert is_valid_session_id(issued)
 
     rejected, minted = capture

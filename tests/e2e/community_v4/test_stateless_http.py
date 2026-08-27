@@ -48,7 +48,7 @@ async def test_a_task_handle_survives_with_no_server_side_session(
         first = await client.call_tool(
             "add_todo", {"text": "s", "context": "stateless first call"}
         )
-        minted = _text(first).split("session_id=")[1].split(" ")[0]
+        minted = _text(first).split("session_id: ")[1].split("\n")[0]
         await client.call_tool("add_todo", {"text": "s2", "session_id": minted})
 
     time.sleep(0.5)

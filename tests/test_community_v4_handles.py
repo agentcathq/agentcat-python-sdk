@@ -36,7 +36,7 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_AGENT_ID,
     AGENTCAT_TAG_MRTR,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
 )
 from agentcat.modules.detection import ServerFlavor, detect_server
@@ -60,7 +60,7 @@ pytestmark = pytest.mark.skipif(
     reason="Community FastMCP not available",
 )
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
 
 
 @pytest.fixture(autouse=True)
@@ -311,18 +311,25 @@ async def test_prompted_mode_end_to_end(capture):
         add = _named(listed, "add_todo")
         tail = list(add.input_schema["properties"])[-2:]
         assert tail == [SESSION_ID_PARAM, "context"]
-        assert SESSION_ID_PARAM not in add.input_schema.get("required", [])
-        assert MCP_INSTRUCTIONS_KEY in add.output_schema["properties"]
+        # Required, with the start|ses_ value contract as its pattern.
+        assert SESSION_ID_PARAM in add.input_schema["required"]
+        assert "pattern" in add.input_schema["properties"][SESSION_ID_PARAM]
+        assert MCP_SESSION_KEY in add.output_schema["properties"]
         assert any(t.name == "get_more_tools" for t in listed)
 
         r1 = await client.call_tool(
-            "add_todo", {"text": "hi", "context": "tracking the user's work"}
+            "add_todo",
+            {
+                "text": "hi",
+                SESSION_ID_PARAM: "start",
+                "context": "tracking the user's work",
+            },
         )
         text = _text(r1)
         assert MINT_BACK_HEADER in text
-        minted = text.split("session_id=")[1].split(" ")[0]
+        minted = text.split("session_id: ")[1].split("\n")[0]
         assert minted.startswith("ses_")
-        assert r1.structured_content[MCP_INSTRUCTIONS_KEY]["session_id"] == minted
+        assert r1.structured_content[MCP_SESSION_KEY]["session_id"] == minted
 
         r2 = await client.call_tool(
             "add_todo", {"text": "again", SESSION_ID_PARAM: minted}
@@ -501,7 +508,7 @@ async def test_a_real_client_drives_a_full_input_required_round_trip(capture):
     assert events[1].tags[AGENTCAT_TAG_MRTR] == "continuation"
     # The completing round is the one that mints, and its handle is the one the
     # agent was handed.
-    minted = _text(result).split("session_id=")[1].split(" ")[0]
+    minted = _text(result).split("session_id: ")[1].split("\n")[0]
     assert events[1].session_id == minted
 
 
@@ -649,7 +656,7 @@ async def test_agentcat_is_outermost_of_the_response_cache(capture):
     # The cache below us never saw an injected argument...
     assert below["arguments"] == [{"text": "same"}]
     # ...and its hit did not swallow the second call.
-    minted = [_text(r).split("session_id=")[1].split(" ")[0] for r in (r1, r2)]
+    minted = [_text(r).split("session_id: ")[1].split("\n")[0] for r in (r1, r2)]
     assert minted[0] != minted[1]
     assert [e.session_id for e in _call_events(capture)] == minted
 

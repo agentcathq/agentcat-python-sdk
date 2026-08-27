@@ -28,13 +28,15 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_AGENT_ID,
     AGENTCAT_TAG_AGENT_SOURCE,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
 )
 
 pytestmark = pytest.mark.e2e
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = (
+    "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
+)
 AGENT = "opus-4.80-1m|claude-code|k3n9x"
 
 
@@ -59,9 +61,9 @@ async def test_the_agent_handle_survives_the_wire(v4_http_server, capture_queue)
     FastMCP validates its own outbound results, so a schema that is malformed
     once `agent_id` joins `session_id` and `context` fails server-side here
     rather than reaching the agent. Property order is the contract
-    (`modules/injection.py` §"Resulting property order"), and `agent_id` is
-    required where `session_id` is not — omission is the minting signal for one
-    and nothing for the other.
+    (`modules/injection.py` §"Resulting property order"), and both handles are
+    required — `session_id` names `start` as its explicit first-call value,
+    and a call that omits either is still served.
     """
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
@@ -78,8 +80,9 @@ async def test_the_agent_handle_survives_the_wire(v4_http_server, capture_queue)
         "context",
     ]
     assert AGENT_ID_PARAM in add.input_schema["required"]
-    assert SESSION_ID_PARAM not in add.input_schema["required"]
-    assert MCP_INSTRUCTIONS_KEY in add.output_schema["properties"]
+    assert SESSION_ID_PARAM in add.input_schema["required"]
+    assert "pattern" in add.input_schema["properties"][SESSION_ID_PARAM]
+    assert MCP_SESSION_KEY in add.output_schema["properties"]
 
 
 async def test_a_supplied_agent_handle_tags_the_event(v4_http_server, capture_queue):
@@ -97,8 +100,8 @@ async def test_a_supplied_agent_handle_tags_the_event(v4_http_server, capture_qu
         # handle fails here rather than passing silently.
         text = _text(result)
         assert MINT_BACK_HEADER in text
-        minted = text.split("session_id=")[1].split(" ")[0]
-        mirror = result.structured_content[MCP_INSTRUCTIONS_KEY]
+        minted = text.split("session_id: ")[1].split("\n")[0]
+        mirror = result.structured_content[MCP_SESSION_KEY]
         assert mirror[SESSION_ID_PARAM] == minted
         assert mirror[AGENT_ID_PARAM] == AGENT
 
@@ -123,16 +126,22 @@ async def test_both_handles_echo_across_calls(v4_http_server, capture_queue):
     url, _ = v4_http_server
     async with Client(StreamableHttpTransport(url)) as client:
         first = await client.call_tool(
-            "add_todo", {"text": "one", AGENT_ID_PARAM: AGENT, "context": "start"}
+            "add_todo",
+            {
+                "text": "one",
+                SESSION_ID_PARAM: "start",
+                AGENT_ID_PARAM: AGENT,
+                "context": "start",
+            },
         )
-        minted = _text(first).split("session_id=")[1].split(" ")[0]
+        minted = _text(first).split("session_id: ")[1].split("\n")[0]
 
         second = await client.call_tool(
             "add_todo",
             {"text": "two", SESSION_ID_PARAM: minted, AGENT_ID_PARAM: AGENT},
         )
         assert MINT_BACK_HEADER not in _text(second)
-        assert second.structured_content[MCP_INSTRUCTIONS_KEY][AGENT_ID_PARAM] == AGENT
+        assert second.structured_content[MCP_SESSION_KEY][AGENT_ID_PARAM] == AGENT
 
     time.sleep(0.5)
     events = _call_events(capture_queue)[-2:]
@@ -167,7 +176,7 @@ async def test_omitting_the_required_agent_handle_degrades_to_absence(
     async with Client(StreamableHttpTransport(url)) as client:
         result = await client.call_tool("add_todo", {"text": "no agent"})
         assert MINT_BACK_HEADER in _text(result)
-        assert AGENT_ID_PARAM not in result.structured_content[MCP_INSTRUCTIONS_KEY]
+        assert AGENT_ID_PARAM not in result.structured_content[MCP_SESSION_KEY]
 
     time.sleep(0.5)
     event = _call_events(capture_queue)[-1]

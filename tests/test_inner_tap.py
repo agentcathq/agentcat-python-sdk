@@ -546,9 +546,9 @@ class TestOfficialV1:
 
         assert tracked.isError == untracked.isError is True
         # The SDK's own error block, byte for byte. (A tracked result also
-        # carries AgentCat's task mint-back, which is v2 behavior the tap
-        # neither adds to nor removes from.)
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        # carries AgentCat's task mint-back in front of it, which is v2
+        # behavior the tap neither adds to nor removes from.)
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
         # Positive control. Everything above is an equality between two runs,
         # so it passes just as well when track() is a no-op — verified by
         # reducing track() to `return server`, which leaves the assertions
@@ -719,9 +719,9 @@ class TestOfficialV1:
             result = await client.call_tool("boom", {"marker": 123})
 
         assert result.isError is True
-        # content[0] is the SDK's own error block; anything after it is
-        # AgentCat's task mint-back, which every v2 result carries.
-        surfaced = result.content[0].text
+        # content[0] is AgentCat's task mint-back, which every v2 result
+        # carries in front; the SDK's own error block follows it.
+        surfaced = result.content[1].text
         assert surfaced.startswith("Input validation error:")
         error = _one(events, "boom").error
         assert error == {"message": surfaced, "type": None, "platform": "python"}
@@ -904,7 +904,7 @@ class TestOfficialV2:
         # holds trivially when track() does nothing.
         assert _call_events(events, "boom")
         assert len(tracked.content) > len(untracked.content)
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
 
     @pytest.mark.asyncio
     async def test_parallel_failures_each_get_their_own_slot(self, events):
@@ -1170,9 +1170,9 @@ class TestCommunity:
             )
 
         assert result.is_error is True
-        # content[0] is the backend's own error block; anything after it is
-        # AgentCat's task mint-back, which every v2 result carries.
-        upstream = result.content[0].text
+        # content[0] is AgentCat's task mint-back, which every v2 result
+        # carries in front; the backend's own error block follows it.
+        upstream = result.content[1].text
         assert "kaboom one" in upstream
         error = _one(events, "boom").error
         assert error["message"] == upstream
@@ -1202,7 +1202,7 @@ class TestCommunity:
         tracked = await call(tracked_server)
 
         assert tracked.is_error == untracked.is_error is True
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
         # Positive control: see the v1 sibling. An equality between two runs
         # holds trivially when track() does nothing.
         assert _call_events(events, "boom")

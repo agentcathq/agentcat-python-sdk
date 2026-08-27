@@ -9,7 +9,7 @@ listWrap.buildInjectedList.
 
 Two passes over the tools, in order:
 
-1. Handle pass — session_id/agent_id input params plus the _mcp_instructions
+1. Handle pass — session_id/agent_id input params plus the mcp_session
    outputSchema extension. Runs only when at least one handle is injectable
    (prompted-mode tracing -> session_id, agent tracking -> agent_id); when
    neither is, the pass is skipped wholesale and schemas keep their original
@@ -20,10 +20,11 @@ Two passes over the tools, in order:
    events.
 
 Resulting property order: customer params, session_id, agent_id, context.
-session_id is never required — omission is the minting signal. agent_id and
-context are both appended to required; that is client-side compliance
-only, since callWrap tolerates either being absent, and it is the only
-enforcement an injected parameter has.
+Every injected param is appended to required, and session_id also declares
+the start|ses_ value pattern; both are client-side compliance only, since
+callWrap tolerates an absent or malformed value (treating it as the start
+of a new task), and schema-aware clients are the only enforcement an
+injected parameter has.
 """
 
 from collections.abc import Iterable
@@ -33,15 +34,18 @@ from typing import Any
 from agentcat.modules.constants import (
     AGENT_ID_PARAM,
     AGENT_ID_PARAM_DESCRIPTION,
-    AGENT_ID_PARAM_DESCRIPTION_HOOK_MODE,
     CONTEXT_PARAM,
     GET_MORE_TOOLS_NAME,
-    MCP_INSTRUCTIONS_AGENT_ID_DESCRIPTION,
-    MCP_INSTRUCTIONS_FIELD_DESCRIPTION,
-    MCP_INSTRUCTIONS_KEY,
-    MCP_INSTRUCTIONS_SESSION_ID_DESCRIPTION,
+    MCP_SESSION_AGENT_ID_DESCRIPTION,
+    MCP_SESSION_FIELD_DESCRIPTION,
+    MCP_SESSION_FIELD_DESCRIPTION_HOOK_MODE,
+    MCP_SESSION_KEY,
+    MCP_SESSION_SESSION_ID_DESCRIPTION,
+    MCP_SESSION_STATUS_DESCRIPTION,
     SESSION_ID_PARAM,
     SESSION_ID_PARAM_DESCRIPTION,
+    SESSION_ID_PARAM_PATTERN,
+    SESSION_START_SENTINEL,
 )
 from agentcat.modules.logging import write_to_log
 from agentcat.types import AgentCatOptions
@@ -69,7 +73,7 @@ class InjectionResult:
 
     injected_params has an entry for EVERY tool seen (possibly empty), so
     the strip fallback applies only to tools never seen in any listing.
-    output_injected lists tools whose outputSchema gained _mcp_instructions.
+    output_injected lists tools whose outputSchema gained mcp_session.
     declared_session_params lists tools whose OWN schema declared
     `session_id`; see `build_injected_schemas` for why that is a separate
     signal rather than "absent from injected_params".
@@ -80,30 +84,40 @@ class InjectionResult:
     declared_session_params: set[str] = field(default_factory=set)
 
 
-def mcp_instructions_schema_property(
+def mcp_session_schema_property(
     include_session_id: bool, include_agent_id: bool
 ) -> dict[str, Any]:
-    """Build a fresh _mcp_instructions outputSchema fragment.
+    """Build a fresh mcp_session outputSchema fragment.
 
-    Sub-properties mirror the modes — no session_id in hook mode, no agent_id
-    when tracking is off — so the copy never references a parameter the
-    agent cannot see. `instructions` is unconditional.
+    Sub-properties mirror the modes — no session_id or status in hook mode,
+    no agent_id when tracking is off — so the copy never references a
+    parameter the agent cannot see. Hook mode is `include_session_id` False
+    with `include_agent_id` on, and carries its own field description.
     """
     sub_properties: dict[str, Any] = {}
     if include_session_id:
         sub_properties[SESSION_ID_PARAM] = {
             "type": "string",
-            "description": MCP_INSTRUCTIONS_SESSION_ID_DESCRIPTION,
+            "description": MCP_SESSION_SESSION_ID_DESCRIPTION,
         }
     if include_agent_id:
         sub_properties[AGENT_ID_PARAM] = {
             "type": "string",
-            "description": MCP_INSTRUCTIONS_AGENT_ID_DESCRIPTION,
+            "description": MCP_SESSION_AGENT_ID_DESCRIPTION,
         }
-    sub_properties["instructions"] = {"type": "string"}
+    if include_session_id:
+        sub_properties["status"] = {
+            "type": "string",
+            "enum": ["issued", "active", "unrecognized"],
+            "description": MCP_SESSION_STATUS_DESCRIPTION,
+        }
     return {
         "type": "object",
-        "description": MCP_INSTRUCTIONS_FIELD_DESCRIPTION,
+        "description": (
+            MCP_SESSION_FIELD_DESCRIPTION
+            if include_session_id
+            else MCP_SESSION_FIELD_DESCRIPTION_HOOK_MODE
+        ),
         "properties": sub_properties,
     }
 
@@ -115,6 +129,7 @@ def _inject_param(
     description: str,
     required: bool,
     entry: set[str],
+    pattern: str | None = None,
 ) -> None:
     """Add one string param, honoring collisions and the required array."""
     properties = schema.setdefault("properties", {})
@@ -124,7 +139,10 @@ def _inject_param(
             f"Skipping {name} injection."
         )
         return
-    properties[name] = {"type": "string", "description": description}
+    prop: dict[str, Any] = {"type": "string", "description": description}
+    if pattern is not None:
+        prop["pattern"] = pattern
+    properties[name] = prop
     if required:
         existing = schema.get("required")
         if isinstance(existing, list):
@@ -205,18 +223,14 @@ def _add_handle_parameters(
                 schema,
                 SESSION_ID_PARAM,
                 SESSION_ID_PARAM_DESCRIPTION,
-                False,
+                True,
                 entry,
+                pattern=SESSION_ID_PARAM_PATTERN,
             )
     if inject_agent_id:
-        # Hook mode has no session_id param anywhere; never reference one the
-        # agent cannot see.
-        description = (
-            AGENT_ID_PARAM_DESCRIPTION
-            if inject_session_id
-            else AGENT_ID_PARAM_DESCRIPTION_HOOK_MODE
+        _inject_param(
+            tool.name, schema, AGENT_ID_PARAM, AGENT_ID_PARAM_DESCRIPTION, True, entry
         )
-        _inject_param(tool.name, schema, AGENT_ID_PARAM, description, True, entry)
 
     _extend_output_schema(tool, inject_session_id, inject_agent_id, result)
 
@@ -227,7 +241,7 @@ def _extend_output_schema(
     inject_agent_id: bool,
     result: InjectionResult,
 ) -> None:
-    """Declare the optional _mcp_instructions property on a plain-object
+    """Declare the optional mcp_session property on a plain-object
     outputSchema so schema-validating clients accept the mirrored field.
 
     Never added to required. Composed schemas have no single properties bag
@@ -240,18 +254,18 @@ def _extend_output_schema(
     if any(key in schema for key in _COMPOSED_KEYS):
         write_to_log(
             f'WARN: Tool "{tool.name}" has complex outputSchema '
-            f"(oneOf/allOf/anyOf). Skipping {MCP_INSTRUCTIONS_KEY} injection; "
+            f"(oneOf/allOf/anyOf). Skipping {MCP_SESSION_KEY} injection; "
             "mint-back stays content-only for this tool."
         )
         return
     properties = schema.setdefault("properties", {})
-    if MCP_INSTRUCTIONS_KEY in properties:
+    if MCP_SESSION_KEY in properties:
         write_to_log(
             f'WARN: Tool "{tool.name}" already declares '
-            f"'{MCP_INSTRUCTIONS_KEY}' in outputSchema. Skipping injection."
+            f"'{MCP_SESSION_KEY}' in outputSchema. Skipping injection."
         )
         return
-    properties[MCP_INSTRUCTIONS_KEY] = mcp_instructions_schema_property(
+    properties[MCP_SESSION_KEY] = mcp_session_schema_property(
         inject_session_id, inject_agent_id
     )
     result.output_injected.add(tool.name)
@@ -270,8 +284,9 @@ def _add_context_parameter(tool: ToolSpec, description: str, entry: set[str]) ->
     means agents quietly stop supplying it and `user_intent` coverage decays
     with nothing to show for it.
 
-    `session_id` is the deliberate exception (never required): omitting it is how
-    an agent signals "mint me one".
+    `session_id` is required the same way, with `start` as its explicit
+    first-call value — an agent asks to be minted one by sending the sentinel,
+    and an absent value still mints so a stale schema never errors.
     """
     schema = tool.input_schema
     properties = schema.get("properties")
@@ -359,7 +374,8 @@ def injected_parameter_names(
 
     - `session_id` counts as ours iff prompted-mode tracing would have
       injected it (`enable_tracing` on, no `resolve_session_id` hook) AND the
-      value the agent sent is absent or matches our minted `ses_` KSUID shape.
+      value the agent sent is absent, the `start` sentinel our copy tells
+      agents to send first, or our minted `ses_` KSUID shape.
       A non-minted value is presumed the customer's own parameter: it is not
       stripped, and — because this same set feeds `resolve_handles` — it is
       not branded invalid or corrected on the wire either.
@@ -388,10 +404,14 @@ def injected_parameter_names(
     names: set[str] = set()
     if opts.enable_tracing and opts.resolve_session_id is None:
         value = args.get(SESSION_ID_PARAM)
-        looks_minted = value is None or (
-            isinstance(value, str) and is_valid_session_id(value.strip())
+        looks_ours = value is None or (
+            isinstance(value, str)
+            and (
+                value.strip().lower() == SESSION_START_SENTINEL
+                or is_valid_session_id(value.strip())
+            )
         )
-        if looks_minted:
+        if looks_ours:
             names.add(SESSION_ID_PARAM)
     if opts.enable_tracing and opts.enable_agent_tracking:
         names.add(AGENT_ID_PARAM)

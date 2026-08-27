@@ -174,7 +174,10 @@ async def test_get_more_tools_alongside_openapi(capture):
         # get_more_tools carries its own context arg by design; other tools get
         # one injected.
         assert "context" in by_name["get_severity"].inputSchema.get("properties", {})
-        assert by_name["get_more_tools"].inputSchema["required"] == ["context"]
+        assert by_name["get_more_tools"].inputSchema["required"] == [
+            "context",
+            "session_id",
+        ]
         result = await client.call_tool(
             "get_more_tools", {"context": "need more tools"}
         )

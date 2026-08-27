@@ -22,13 +22,15 @@ import pytest
 
 from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
 )
 
 pytestmark = pytest.mark.e2e
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = (
+    "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
+)
 
 
 def _call_events(capture_queue):
@@ -52,7 +54,7 @@ async def test_handshake_and_list_publish_nothing(v4_http_server, capture_queue)
     time.sleep(0.5)
     add = next(t for t in listed if t.name == "add_todo")
     assert list(add.input_schema["properties"])[-2:] == [SESSION_ID_PARAM, "context"]
-    assert MCP_INSTRUCTIONS_KEY in add.output_schema["properties"]
+    assert MCP_SESSION_KEY in add.output_schema["properties"]
     assert capture_queue == [], [e.event_type for e in capture_queue]
 
 
@@ -65,13 +67,18 @@ async def test_task_handle_is_minted_then_echoed(v4_http_server, capture_queue):
     url, _ = v4_http_server
     async with Client(StreamableHttpTransport(url)) as client:
         first = await client.call_tool(
-            "add_todo", {"text": "one", "context": "first call of the task"}
+            "add_todo",
+            {
+                "text": "one",
+                SESSION_ID_PARAM: "start",
+                "context": "first call of the task",
+            },
         )
         text = _text(first)
         assert MINT_BACK_HEADER in text
-        minted = text.split("session_id=")[1].split(" ")[0]
+        minted = text.split("session_id: ")[1].split("\n")[0]
         assert minted.startswith("ses_")
-        assert first.structured_content[MCP_INSTRUCTIONS_KEY]["session_id"] == minted
+        assert first.structured_content[MCP_SESSION_KEY]["session_id"] == minted
 
         second = await client.call_tool(
             "add_todo", {"text": "two", SESSION_ID_PARAM: minted}

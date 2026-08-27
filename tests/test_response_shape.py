@@ -23,7 +23,7 @@ import json
 import pytest
 
 from agentcat import AgentCatOptions, track
-from agentcat.modules.constants import MCP_INSTRUCTIONS_KEY, SESSION_ID_PARAM
+from agentcat.modules.constants import MCP_SESSION_KEY, SESSION_ID_PARAM
 
 from .test_utils import FASTMCP_TOOLRESULT_HAS_IS_ERROR, sid
 from .test_utils.flavors import flavors
@@ -86,5 +86,5 @@ async def test_the_event_response_keeps_its_eras_own_field_names(flavor, capture
     # ...and it is the customer's own result, undecorated: the mint-back is
     # wire-only and must never reach the analytics payload.
     assert response[structured_key] == {"result": "echo:hi"}
-    assert MCP_INSTRUCTIONS_KEY not in json.dumps(response)
-    assert "[MCP INSTRUCTIONS]" not in json.dumps(response)
+    assert MCP_SESSION_KEY not in json.dumps(response)
+    assert "[session_id" not in json.dumps(response)

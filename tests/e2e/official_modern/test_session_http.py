@@ -22,7 +22,7 @@ from agentcat.modules.constants import (
 
 pytestmark = pytest.mark.e2e
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
 
 
 def _call_events(capture_queue):
@@ -42,11 +42,16 @@ async def test_minted_session_id_is_echoed_across_http_calls(
     url, _ = modern_http_server
     async with Client(url) as client:
         first = await client.call_tool(
-            "add_todo", {"text": "one", "context": "first call of the task"}
+            "add_todo",
+            {
+                "text": "one",
+                "session_id": "start",
+                "context": "first call of the task",
+            },
         )
         text = _text(first)
         assert MINT_BACK_HEADER in text
-        minted = text.split("session_id=")[1].split(" ")[0]
+        minted = text.split("session_id: ")[1].split("\n")[0]
         assert minted.startswith("ses_")
 
         second = await client.call_tool(
@@ -70,16 +75,21 @@ async def test_minted_session_id_is_echoed_across_http_calls(
 async def test_separate_connections_get_separate_tasks(
     modern_http_server, capture_queue
 ):
-    """Nothing is stored server-side, so two agents that never echo a handle
-    get two different tasks."""
+    """Nothing is stored server-side, so two agents that each send `start`
+    get two different tasks — start always begins a new, unrelated one."""
     url, _ = modern_http_server
 
     async def call_once(text: str) -> str:
         async with Client(url) as client:
             result = await client.call_tool(
-                "add_todo", {"text": text, "context": "independent task"}
+                "add_todo",
+                {
+                    "text": text,
+                    "session_id": "start",
+                    "context": "independent task",
+                },
             )
-            return _text(result).split("session_id=")[1].split(" ")[0]
+            return _text(result).split("session_id: ")[1].split("\n")[0]
 
     first = await call_once("a")
     second = await call_once("b")
@@ -255,4 +265,4 @@ async def test_injected_schema_survives_the_wire(modern_http_server, capture_que
 
     add = next(t for t in listed.tools if t.name == "add_todo")
     assert list(add.input_schema["properties"])[-2:] == ["session_id", "context"]
-    assert "_mcp_instructions" in add.output_schema["properties"]
+    assert "mcp_session" in add.output_schema["properties"]

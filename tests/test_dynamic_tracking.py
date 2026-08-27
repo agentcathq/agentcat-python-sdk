@@ -202,8 +202,13 @@ class TestDynamicTracking:
                 "agent_id",
                 "context",
             ]
-            # session_id is the one injected param that is never required.
-            assert tool.inputSchema["required"] == ["agent_id", "context"]
+            # Every injected param is required — session_id included, with
+            # `start` as its explicit first-call value.
+            assert tool.inputSchema["required"] == [
+                "session_id",
+                "agent_id",
+                "context",
+            ]
 
             # The handler above rejects anything but `value`, so this call
             # only succeeds if both injected parameters were stripped.

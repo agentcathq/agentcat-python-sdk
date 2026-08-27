@@ -7,8 +7,8 @@ receives the `session_id` handle, so the injected property order is
 `context` stays REQUIRED, as it was in 1.x. Nothing server-side rejects a call
 that omits it — a schema-validating client refusing to send one is the whole
 enforcement mechanism, and without it agents quietly stop supplying intent.
-`session_id` is the one injected parameter that is never required: omitting it is
-how an agent asks to be minted one.
+`session_id` is required the same way, with `start` as its explicit first-call
+value; an absent value still mints, so a stale schema never errors.
 """
 
 import time
@@ -53,8 +53,9 @@ class TestToolContext:
             # Required, as in 1.x: a strict client refusing to send a call
             # without it is the only thing that makes agents supply intent.
             assert "context" in tool.inputSchema["required"]
-            # ...and session_id is not, because omitting it is the mint signal.
-            assert "session_id" not in tool.inputSchema.get("required", [])
+            # ...and so is session_id, whose copy names start as the value
+            # that asks to be minted one.
+            assert "session_id" in tool.inputSchema["required"]
 
     @pytest.mark.asyncio
     async def test_context_parameter_not_injected_when_disabled(self):
@@ -94,7 +95,7 @@ class TestToolContext:
         simple = _named(await _tools(mcp), "simple_tool")
         assert simple.inputSchema is not None
         assert "context" in simple.inputSchema["properties"]
-        assert simple.inputSchema["required"] == ["context"]
+        assert simple.inputSchema["required"] == ["session_id", "context"]
 
     @pytest.mark.asyncio
     async def test_schema_with_empty_properties(self):
@@ -118,7 +119,7 @@ class TestToolContext:
         track(server, "test_project", AgentCatOptions(enable_tool_call_context=True))
 
         add_todo = _named(await _tools(server), "add_todo")
-        assert add_todo.inputSchema["required"] == ["text", "context"]
+        assert add_todo.inputSchema["required"] == ["text", "session_id", "context"]
 
     @pytest.mark.asyncio
     async def test_schema_with_no_required_fields(self):
@@ -133,10 +134,10 @@ class TestToolContext:
         track(mcp, "test_project", AgentCatOptions(enable_tool_call_context=True))
 
         tool = _named(await _tools(mcp), "optional_params_tool")
-        assert tool.inputSchema["required"] == ["context"]
+        assert tool.inputSchema["required"] == ["session_id", "context"]
 
-        # With the context pass off there is nothing to require at all, so the
-        # tool's own (absent) required array is left absent.
+        # With the context pass off, the handle pass still requires the
+        # session_id it injected — requiredness rides injection exactly.
         untouched = FastMCP("test-server-2")
 
         @untouched.tool()
@@ -148,7 +149,7 @@ class TestToolContext:
             untouched, "test_project", AgentCatOptions(enable_tool_call_context=False)
         )
         listed = _named(await _tools(untouched), "other_tool")
-        assert listed.inputSchema.get("required", []) == []
+        assert listed.inputSchema.get("required", []) == ["session_id"]
 
     @pytest.mark.asyncio
     async def test_server_with_no_tools(self):
@@ -173,7 +174,7 @@ class TestToolContext:
         get_more_tools = _named(tools, "get_more_tools")
         context_schema = get_more_tools.inputSchema["properties"]["context"]
         assert context_schema["description"] != DEFAULT_CONTEXT_DESCRIPTION
-        assert get_more_tools.inputSchema["required"] == ["context"]
+        assert get_more_tools.inputSchema["required"] == ["context", "session_id"]
 
         for tool in tools:
             if tool.name == "get_more_tools":

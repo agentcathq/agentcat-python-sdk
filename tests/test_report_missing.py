@@ -72,10 +72,10 @@ class TestReportMissing:
 
             # Verify successful response. get_more_tools publishes events like
             # any other tool, so it mints a task and carries the mint-back
-            # block after its own answer.
+            # block in front of its own answer.
             assert result.content[0].type == "text"
-            assert "Unfortunately" in result.content[0].text
-            assert "[MCP INSTRUCTIONS]: session_id issued." in result.content[-1].text
+            assert result.content[0].text.startswith("[session_id issued")
+            assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_valid_params(self):
@@ -100,8 +100,9 @@ class TestReportMissing:
 
             for params in test_cases:
                 result = await client.call_tool("get_more_tools", params)
-                assert result.content[0].text
-                assert "Unfortunately" in result.content[0].text
+                # content[0] is the minted-session block; the answer follows.
+                assert result.content[1].text
+                assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_missing_params(self):
@@ -116,12 +117,12 @@ class TestReportMissing:
             # call over its own analytics, so a lax client still gets an answer.
             result = await client.call_tool("get_more_tools", {})
             assert result.isError is False
-            assert "Unfortunately" in result.content[0].text
+            assert "Unfortunately" in result.content[1].text
 
             # Test with valid context
             result = await client.call_tool("get_more_tools", {"context": "test_tool"})
-            assert result.content[0].text
-            assert "Unfortunately" in result.content[0].text
+            assert result.content[1].text
+            assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_extra_params(self):
@@ -139,8 +140,8 @@ class TestReportMissing:
             )
 
             # Should still work normally
-            assert result.content[0].text
-            assert "Unfortunately" in result.content[0].text
+            assert result.content[1].text
+            assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_other_tools(self):
@@ -152,17 +153,17 @@ class TestReportMissing:
         async with create_test_client(server) as client:
             # First use a regular tool
             add_result = await client.call_tool("add_todo", {"text": "Test todo item"})
-            assert "Added todo" in add_result.content[0].text
+            assert "Added todo" in add_result.content[1].text
 
             # Then use report_missing
             report_result = await client.call_tool(
                 "get_more_tools", {"context": "Delete a todo item"}
             )
-            assert "Unfortunately" in report_result.content[0].text
+            assert "Unfortunately" in report_result.content[1].text
 
             # Verify the original tool still works
             list_result = await client.call_tool("list_todos")
-            assert "Test todo item" in list_result.content[0].text
+            assert "Test todo item" in list_result.content[1].text
 
     @pytest.mark.asyncio
     async def test_multiple_report_missing_calls(self):
@@ -187,8 +188,8 @@ class TestReportMissing:
                     },
                 )
                 # Each call should work identically
-                assert result.content[0].text
-                assert "Unfortunately" in result.content[0].text
+                assert result.content[1].text
+                assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_with_context_enabled(self):
@@ -247,7 +248,7 @@ class TestReportMissing:
             # fail the call either.
             result = await client.call_tool("get_more_tools", {"context": None})
             assert result.isError is False
-            assert "Unfortunately" in result.content[0].text
+            assert "Unfortunately" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_report_missing_publishes_event(self):

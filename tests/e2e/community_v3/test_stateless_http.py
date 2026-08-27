@@ -38,7 +38,7 @@ async def test_every_call_carries_a_task_handle(v3_http_server, capture_queue):
     async with Client(StreamableHttpTransport(url)) as client:
         first = await client.call_tool("add_todo", {"text": "s", "context": "x"})
         text = "".join(c.text for c in first.content if hasattr(c, "text"))
-        minted = text.split("session_id=")[1].split(" ")[0]
+        minted = text.split("session_id: ")[1].split("\n")[0]
 
         await client.call_tool("add_todo", {"text": "s2", "session_id": minted})
 

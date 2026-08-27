@@ -30,7 +30,7 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_AGENT_ID,
     AGENTCAT_TAG_AGENT_SOURCE,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
 )
 from tests.test_utils import NEEDS_STRUCTURED_OUTPUT
@@ -38,7 +38,9 @@ from tests.test_utils.delivery import delivered_arguments_for
 
 pytestmark = pytest.mark.e2e
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = (
+    "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
+)
 AGENT = "opus-4.80-1m|claude-code|k3n9x"
 
 
@@ -62,8 +64,8 @@ async def test_the_agent_handle_survives_the_wire(official_http_server, capture_
     """Listing with agent tracking on: the schema the agent is handed.
 
     Property order is the contract (`modules/injection.py` §"Resulting property
-    order"), and `agent_id` is required where `session_id` is not — omission is
-    the minting signal for one and nothing for the other.
+    order"), and both handles are required — `session_id` names `start` as its
+    explicit first-call value, and a call that omits either is still served.
     """
     url, _ = official_http_server
     async with streamablehttp_client(url) as (read, write, _):
@@ -78,7 +80,8 @@ async def test_the_agent_handle_survives_the_wire(official_http_server, capture_
         "context",
     ]
     assert AGENT_ID_PARAM in add.inputSchema["required"]
-    assert SESSION_ID_PARAM not in add.inputSchema["required"]
+    assert SESSION_ID_PARAM in add.inputSchema["required"]
+    assert "pattern" in add.inputSchema["properties"][SESSION_ID_PARAM]
 
 
 @pytest.mark.asyncio
@@ -124,9 +127,15 @@ async def test_both_handles_echo_across_calls(official_http_server, capture_queu
         async with ClientSession(read, write) as client:
             await client.initialize()
             first = await client.call_tool(
-                "add_todo", {"text": "one", AGENT_ID_PARAM: AGENT, "context": "start"}
+                "add_todo",
+                {
+                    "text": "one",
+                    SESSION_ID_PARAM: "start",
+                    AGENT_ID_PARAM: AGENT,
+                    "context": "start",
+                },
             )
-            minted = _text(first).split("session_id=")[1].split(" ")[0]
+            minted = _text(first).split("session_id: ")[1].split("\n")[0]
 
             second = await client.call_tool(
                 "add_todo",
@@ -222,12 +231,12 @@ async def test_both_handles_are_mirrored_into_structured_content(
             await client.initialize()
             listed = await client.list_tools()
             add = next(t for t in listed.tools if t.name == "add_todo")
-            assert MCP_INSTRUCTIONS_KEY in add.outputSchema["properties"]
+            assert MCP_SESSION_KEY in add.outputSchema["properties"]
 
             result = await client.call_tool(
                 "add_todo", {"text": "mirrored", AGENT_ID_PARAM: AGENT}
             )
-            mirror = result.structuredContent[MCP_INSTRUCTIONS_KEY]
+            mirror = result.structuredContent[MCP_SESSION_KEY]
             assert mirror[SESSION_ID_PARAM].startswith("ses_")
             assert mirror[AGENT_ID_PARAM] == AGENT
             # The customer's own structured payload survives untouched.

@@ -35,7 +35,7 @@ import pytest
 from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
     SESSION_ID_PARAM_DESCRIPTION,
 )
@@ -96,10 +96,10 @@ async def test_a_customers_own_session_id_is_never_the_handle(flavor, capture):
     # customer's tool does — nor confirms their value back to them.
     # (Their own tool body still echoes TASK-1234 in its result — that is their
     # data. What must not appear is an AgentCat-authored block naming it, which
-    # is what the absence of MCP_INSTRUCTIONS_KEY asserts.)
+    # is what the absence of MCP_SESSION_KEY asserts.)
     for result in (first, second):
-        assert "[MCP INSTRUCTIONS]" not in result.text
-        assert MCP_INSTRUCTIONS_KEY not in (result.structured or {})
+        assert "[session_id" not in result.text
+        assert MCP_SESSION_KEY not in (result.structured or {})
 
 
 @pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
@@ -148,7 +148,7 @@ async def test_agent_id_is_still_confirmed_on_a_colliding_tool(flavor, capture):
             {"session_id": "TASK-1234", "note": "n", "agent_id": "opus|cc|k3n9x"},
         )
 
-    mint = (result.structured or {}).get(MCP_INSTRUCTIONS_KEY)
+    mint = (result.structured or {}).get(MCP_SESSION_KEY)
     assert mint is not None, "agent_id was withheld because session_id collided"
     assert mint["agent_id"] == "opus|cc|k3n9x"
     assert SESSION_ID_PARAM not in mint

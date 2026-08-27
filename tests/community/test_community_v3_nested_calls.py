@@ -20,7 +20,7 @@ from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import (
     AGENTCAT_TAG_NESTED,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
 )
 
 from ..test_utils.community_catalog_server import (
@@ -53,7 +53,7 @@ catalog = pytest.mark.skipif(
     reason="fastmcp CatalogTransform not available",
 )
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
 CONTEXT = "Driving the hidden catalog through the meta tool to exercise nesting"
 
 
@@ -76,7 +76,7 @@ def _call_events(capture) -> list:
 
 
 def _minted_from(result) -> str:
-    minted = _text(result).split("session_id=")[1].split(" ")[0]
+    minted = _text(result).split("session_id: ")[1].split("\n")[0]
     assert minted.startswith("ses_")
     return minted
 
@@ -165,7 +165,7 @@ async def test_a_nested_call_joins_the_session_and_is_never_decorated(capture):
     # The inner result, as agent-authored code would consume it, is the
     # customer's data and nothing else: no mint-back block, no mirror key.
     assert observed["inner_text"] == "echo:hello"
-    assert "[MCP INSTRUCTIONS]" not in observed["inner_text"]
+    assert "[session_id" not in observed["inner_text"]
     assert observed["inner_structured"] == {"result": "echo:hello"}
 
 
@@ -183,7 +183,7 @@ async def test_the_outer_call_is_still_fully_decorated():
         result = await client.call_tool("run", {"program": "hello", "context": CONTEXT})
 
     assert MINT_BACK_HEADER in _text(result)
-    mint = result.structured_content[MCP_INSTRUCTIONS_KEY]
+    mint = result.structured_content[MCP_SESSION_KEY]
     assert mint["session_id"] == _minted_from(result)
     assert result.structured_content["result"] == "ran:hello"
 
