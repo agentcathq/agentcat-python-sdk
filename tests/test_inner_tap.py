@@ -1223,9 +1223,10 @@ class TestCommunity:
             )
 
         assert result.is_error is True
-        # content[0] is AgentCat's task mint-back, which every v2 result
-        # carries in front; the backend's own error block follows it.
-        upstream = result.content[1].text
+        # The backend's own error block is the last one: fastmcp >= 3.4 carries
+        # AgentCat's task mint-back in front of it, while earlier versions (no
+        # `ToolResult.is_error`) put no mint-back on an error result at all.
+        upstream = result.content[-1].text
         assert "kaboom one" in upstream
         error = _one(events, "boom").error
         assert error["message"] == upstream
