@@ -68,9 +68,9 @@ async def test_list_tools_injects_handles_and_context(capture):
         assert SESSION_ID_PARAM in props, f"session_id not injected into {name}"
         assert "context" in props, f"context not injected into {name}"
         assert props["context"]["description"] == CONTEXT_DESC
-        # session_id is never required — omitting it is the minting signal —
-        # but context is, as it was in 1.x.
-        assert SESSION_ID_PARAM not in schema.get("required", [])
+        # Every injected param is required — session_id included, with
+        # `start` as its explicit first-call value — and context as in 1.x.
+        assert SESSION_ID_PARAM in schema["required"]
         assert "context" in schema["required"]
 
 

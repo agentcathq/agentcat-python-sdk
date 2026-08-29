@@ -255,7 +255,9 @@ class TestToolContext:
             result = await client.call_tool(
                 "tool_with_context", {"context": "mine", "data": "d"}
             )
-        assert "Original context: mine" in result.content[0].text
+        # content[0] is AgentCat's task mint-back, which every v2 result
+        # carries in front; the tool's own output follows it.
+        assert "Original context: mine" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_schema_with_allof_anyof_oneof(self):
@@ -322,7 +324,7 @@ class TestToolContext:
                 },
             )
 
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_tool_call_without_context_still_succeeds(self):
@@ -333,7 +335,7 @@ class TestToolContext:
         async with create_test_client(server) as client:
             result = await client.call_tool("add_todo", {"text": "Test todo item"})
 
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -362,7 +364,7 @@ class TestToolContext:
             )
 
         assert result.isError is False
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
         assert delivered_arguments_for(server, "add_todo") == [{"text": "Test todo"}]
 
     @pytest.mark.asyncio
@@ -382,13 +384,13 @@ class TestToolContext:
             list_result = await client.call_tool(
                 "list_todos", {"context": "Listing all todos to verify they were added"}
             )
-            assert "First todo" in list_result.content[0].text
-            assert "Second todo" in list_result.content[0].text
+            assert "First todo" in list_result.content[1].text
+            assert "Second todo" in list_result.content[1].text
 
             complete_result = await client.call_tool(
                 "complete_todo", {"id": 1, "context": "Completing the first todo"}
             )
-            assert "Completed todo" in complete_result.content[0].text
+            assert "Completed todo" in complete_result.content[1].text
 
     @pytest.mark.asyncio
     async def test_context_not_passed_to_original_handler(self):
@@ -408,7 +410,7 @@ class TestToolContext:
             )
 
         assert result.isError is False
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
         assert delivered_arguments_for(server, "add_todo") == [{"text": "test data"}]
 
     @pytest.mark.asyncio
@@ -580,7 +582,7 @@ class TestToolContext:
                     "context": "Adding todo to test custom context description feature",
                 },
             )
-            assert "Added todo" in result.content[0].text
+            assert "Added todo" in result.content[1].text
 
 
 class TestGetMoreToolsContextSchema:
