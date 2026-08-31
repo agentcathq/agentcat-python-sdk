@@ -59,7 +59,7 @@ def generate_prefixed_ksuid(
     prefix: str, use_milliseconds: bool = False, dt: Optional[datetime] = None
 ) -> str:
     """
-    Generate a prefixed KSUID (e.g., "ses_iewjf9023rjdf").
+    Generate a prefixed KSUID (e.g., "ses_2cOHEO0LYGADMzRvWTXXVbbgxgm").
 
     Args:
         prefix: The prefix to add (e.g., "ses", "usr", "evt")
@@ -96,7 +96,8 @@ def parse_prefixed_ksuid(
     Parse a prefixed KSUID string back into its prefix and Ksuid object.
 
     Args:
-        prefixed_ksuid: The prefixed KSUID string (e.g., "ses_iewjf9023rjdf")
+        prefixed_ksuid: The prefixed KSUID string
+            (e.g., "ses_2cOHEO0LYGADMzRvWTXXVbbgxgm")
         use_milliseconds: If True, parses as KsuidMs
 
     Returns:

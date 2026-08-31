@@ -39,6 +39,8 @@ from agentcat.modules.adapters._inner_tap import (
 
 from .test_utils import (
     LEGACY_ONLY,
+    MCPSERVER_CRASH_TEXT_ON_WIRE,
+    MCPSERVER_CRASH_WRAPPER,
     MODERN_ONLY,
     NEEDS_CONCURRENT_DISPATCH,
     NEEDS_LOWLEVEL_ERROR_SEAM,
@@ -546,9 +548,9 @@ class TestOfficialV1:
 
         assert tracked.isError == untracked.isError is True
         # The SDK's own error block, byte for byte. (A tracked result also
-        # carries AgentCat's task mint-back, which is v2 behavior the tap
-        # neither adds to nor removes from.)
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        # carries AgentCat's task mint-back in front of it, which is v2
+        # behavior the tap neither adds to nor removes from.)
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
         # Positive control. Everything above is an equality between two runs,
         # so it passes just as well when track() is a no-op — verified by
         # reducing track() to `return server`, which leaves the assertions
@@ -719,9 +721,9 @@ class TestOfficialV1:
             result = await client.call_tool("boom", {"marker": 123})
 
         assert result.isError is True
-        # content[0] is the SDK's own error block; anything after it is
-        # AgentCat's task mint-back, which every v2 result carries.
-        surfaced = result.content[0].text
+        # content[0] is AgentCat's task mint-back, which every v2 result
+        # carries in front; the SDK's own error block follows it.
+        surfaced = result.content[1].text
         assert surfaced.startswith("Input validation error:")
         error = _one(events, "boom").error
         assert error == {"message": surfaced, "type": None, "platform": "python"}
@@ -783,7 +785,7 @@ class TestOfficialV2:
 
         assert result.is_error is True
         error = _one(events, "boom").error
-        assert error["type"] == "ToolError"
+        assert error["type"] == MCPSERVER_CRASH_WRAPPER
         assert "kaboom one" in error["message"]
         assert error["stack"]
         assert error["frames"]
@@ -793,6 +795,53 @@ class TestOfficialV2:
         tool_frames = _chained_frames_for(error, "boom")
         assert tool_frames and tool_frames[0]["in_app"] is True
         assert "raise Boom" in tool_frames[0]["context_line"]
+
+    @pytest.mark.asyncio
+    async def test_a_crash_publishes_the_same_message_on_every_generation(
+        self, events
+    ):
+        """mcp 2.1 keeps a crash's text off the wire; the event still has it."""
+        from .test_utils.modern_server import create_modern_client
+
+        server = _mcpserver_with_a_raising_tool()
+        track(server, "test_project", AgentCatOptions())
+
+        async with create_modern_client(server) as client:
+            await client.call_tool("boom", {"marker": "one"})
+
+        error = _one(events, "boom").error
+        assert error["message"] == "Error executing tool boom: kaboom one"
+        assert error["chained_errors"][0]["message"] == "kaboom one"
+
+    @pytest.mark.asyncio
+    async def test_a_nested_crash_names_the_inner_tool_once(self, events):
+        """The restored text never repeats what the wrapper already carries."""
+        from mcp.server.mcpserver import MCPServer
+
+        from .test_utils.modern_server import create_modern_client
+
+        server = MCPServer("nesting-server")
+
+        @server.tool()
+        async def inner(marker: str) -> str:
+            """Always fails."""
+            raise Boom(f"INNER {marker}")
+
+        @server.tool()
+        async def outer(marker: str) -> str:
+            """Lets inner's failure through."""
+            await server.call_tool("inner", {"marker": marker})
+            return "unreachable"
+
+        track(server, "test_project", AgentCatOptions())
+
+        async with create_modern_client(server) as client:
+            await client.call_tool("outer", {"marker": "one"})
+
+        message = _one(events, "outer").error["message"]
+        prefix = "Error executing tool outer: Error executing tool inner"
+        assert message.startswith(prefix)
+        assert message.count("Error executing tool inner") == 1
 
     @pytest.mark.asyncio
     async def test_tracking_the_lowlevel_object_directly_still_taps(self, events):
@@ -805,7 +854,7 @@ class TestOfficialV2:
         async with create_modern_client(server) as client:
             await client.call_tool("boom", {"marker": "one"})
 
-        assert _one(events, "boom").error["type"] == "ToolError"
+        assert _one(events, "boom").error["type"] == MCPSERVER_CRASH_WRAPPER
 
     @pytest.mark.asyncio
     async def test_a_repeated_track_does_not_stack_a_second_tap(self, events):
@@ -822,7 +871,7 @@ class TestOfficialV2:
             await client.call_tool("boom", {"marker": "one"})
 
         error = _one(events, "boom").error
-        assert error["type"] == "ToolError"
+        assert error["type"] == MCPSERVER_CRASH_WRAPPER
         assert len([f for f in error["frames"] if f["function"] == "tap"]) == 1
 
     @pytest.mark.asyncio
@@ -904,7 +953,7 @@ class TestOfficialV2:
         # holds trivially when track() does nothing.
         assert _call_events(events, "boom")
         assert len(tracked.content) > len(untracked.content)
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
 
     @pytest.mark.asyncio
     async def test_parallel_failures_each_get_their_own_slot(self, events):
@@ -972,7 +1021,11 @@ class TestOfficialV2:
             result = await client.call_tool("outer", {"marker": "one"})
 
         wire = "".join(c.text for c in result.content if hasattr(c, "text"))
-        assert "OUTER one" in wire and "INNER one" not in wire
+        # The crash's own text is on the wire only where upstream puts it
+        # (see MCPSERVER_CRASH_TEXT_ON_WIRE); the event carries it everywhere.
+        assert "tool outer" in wire and "INNER one" not in wire
+        if MCPSERVER_CRASH_TEXT_ON_WIRE:
+            assert "OUTER one" in wire
         error = _one(events, "outer").error
         assert "OUTER one" in error["message"]
         assert "INNER one" not in error["message"]
@@ -1170,9 +1223,10 @@ class TestCommunity:
             )
 
         assert result.is_error is True
-        # content[0] is the backend's own error block; anything after it is
-        # AgentCat's task mint-back, which every v2 result carries.
-        upstream = result.content[0].text
+        # The backend's own error block is the last one: fastmcp >= 3.4 carries
+        # AgentCat's task mint-back in front of it, while earlier versions (no
+        # `ToolResult.is_error`) put no mint-back on an error result at all.
+        upstream = result.content[-1].text
         assert "kaboom one" in upstream
         error = _one(events, "boom").error
         assert error["message"] == upstream
@@ -1202,7 +1256,7 @@ class TestCommunity:
         tracked = await call(tracked_server)
 
         assert tracked.is_error == untracked.is_error is True
-        assert tracked.content[0].model_dump() == untracked.content[0].model_dump()
+        assert tracked.content[1].model_dump() == untracked.content[0].model_dump()
         # Positive control: see the v1 sibling. An equality between two runs
         # holds trivially when track() does nothing.
         assert _call_events(events, "boom")

@@ -25,7 +25,7 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
     CONTEXT_PARAM,
     GET_MORE_TOOLS_NAME,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
     SESSION_ID_PARAM,
 )
 
@@ -99,7 +99,7 @@ async def test_a_call_before_any_listing_rebuilds_the_registries(
     # The mirror is gated on the rebuilt OUTPUT registry, and `echo` is in it.
     assert data.output_injection_registry is not None
     assert "echo" in data.output_injection_registry
-    assert result.structured[MCP_INSTRUCTIONS_KEY][SESSION_ID_PARAM] == SUPPLIED
+    assert result.structured[MCP_SESSION_KEY][SESSION_ID_PARAM] == SUPPLIED
 
     event = capture[0]
     assert event.session_id == SUPPLIED
@@ -252,9 +252,9 @@ async def test_a_failed_rebuild_spares_a_customers_own_session_id(
     assert built.seen == [
         ("complete_task", {"session_id": "TICKET-9", "note": "done"})
     ]
-    # No "session_id not recognized" correction steering agents away from the
+    # No "session_id unrecognized" correction steering agents away from the
     # customer's own parameter.
-    assert "not recognized" not in (result.text or "")
+    assert "unrecognized" not in (result.text or "")
     # Sessionless, tagged for the dashboard — the honest degraded record.
     event = capture[0]
     assert event.session_id is None
@@ -302,7 +302,7 @@ async def test_a_failed_rebuild_still_protects_get_more_tools_own_context(
     ]
     assert "customer answered: I need a tool to send email" in result.text
     # ...and the handle still rides back with no registry to gate it.
-    assert result.structured[MCP_INSTRUCTIONS_KEY][SESSION_ID_PARAM] == SUPPLIED
+    assert result.structured[MCP_SESSION_KEY][SESSION_ID_PARAM] == SUPPLIED
     assert capture[0].session_id == SUPPLIED
 
 

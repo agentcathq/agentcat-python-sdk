@@ -25,7 +25,8 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_AGENT_ID,
     AGENTCAT_TAG_AGENT_SOURCE,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
+    SESSION_ID_PARAM_PATTERN,
 )
 from agentcat.modules.handles import derive_session_id
 
@@ -34,7 +35,9 @@ from .test_utils.client import create_test_client
 from .test_utils.delivery import delivered_arguments_for, record_delivered_arguments
 from .test_utils.todo_server import create_todo_server
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = (
+    "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
+)
 
 
 @pytest.fixture(autouse=True)
@@ -75,10 +78,14 @@ async def test_prompted_mode_end_to_end(capture):
         listed = await client.list_tools()
         add = next(t for t in listed.tools if t.name == "add_todo")
         assert list(add.inputSchema["properties"])[-2:] == ["session_id", "context"]
-        assert "session_id" not in add.inputSchema.get("required", [])
-        # session_id is the one injected param that is never required — omitting
-        # it is the minting signal. `context` is required, which is the only
-        # thing that makes agents supply intent at all.
+        # Both injected params are required on the wire — schema-aware clients
+        # are the only enforcement, and session_id names `start` as its
+        # explicit first-call value, with the value contract as its pattern.
+        assert "session_id" in add.inputSchema["required"]
+        assert (
+            add.inputSchema["properties"]["session_id"]["pattern"]
+            == SESSION_ID_PARAM_PATTERN
+        )
         assert "context" in add.inputSchema["required"]
         assert any(t.name == "get_more_tools" for t in listed.tools)
 
@@ -86,12 +93,13 @@ async def test_prompted_mode_end_to_end(capture):
             "add_todo",
             {
                 "text": "hi",
+                "session_id": "start",
                 "context": "Adding a todo item for the user's task list to track work",
             },
         )
         text = _text(r1)
         assert MINT_BACK_HEADER in text
-        minted = text.split("session_id=")[1].split(" ")[0]
+        minted = text.split("session_id: ")[1].split("\n")[0]
         assert minted.startswith("ses_")
 
         r2 = await client.call_tool("add_todo", {"text": "again", "session_id": minted})
@@ -109,7 +117,7 @@ async def test_prompted_mode_end_to_end(capture):
     # ...and the customer's result, undecorated.
     assert call_events[0].response is not None
     assert "Added todo" in json.dumps(call_events[0].response)
-    assert "[MCP INSTRUCTIONS]" not in json.dumps(call_events[0].response)
+    assert "[session_id" not in json.dumps(call_events[0].response)
     assert call_events[0].tags[AGENTCAT_TAG_SESSION_SOURCE] == "minted"
     assert call_events[1].tags[AGENTCAT_TAG_SESSION_SOURCE] == "supplied"
     assert call_events[0].user_intent.startswith("Adding a todo item")
@@ -117,7 +125,7 @@ async def test_prompted_mode_end_to_end(capture):
 
 @NEEDS_STRUCTURED_OUTPUT
 async def test_structured_mint_back_mirrors_into_structured_content(capture):
-    """A tool with an outputSchema gets `_mcp_instructions` mirrored in, and its
+    """A tool with an outputSchema gets `mcp_session` mirrored in, and its
     schema declares the field so schema-validating clients still accept it."""
     server = create_todo_server()
     track(server, "proj_test", AgentCatOptions())
@@ -125,10 +133,10 @@ async def test_structured_mint_back_mirrors_into_structured_content(capture):
     async with create_test_client(server) as client:
         listed = await client.list_tools()
         add = next(t for t in listed.tools if t.name == "add_todo")
-        assert MCP_INSTRUCTIONS_KEY in add.outputSchema["properties"]
+        assert MCP_SESSION_KEY in add.outputSchema["properties"]
 
         result = await client.call_tool("add_todo", {"text": "structured"})
-        mint = result.structuredContent[MCP_INSTRUCTIONS_KEY]
+        mint = result.structuredContent[MCP_SESSION_KEY]
         assert mint["session_id"].startswith("ses_")
         assert mint["session_id"] == _call_events(capture)[0].session_id
         # The customer's own structured payload survives untouched.
@@ -137,7 +145,7 @@ async def test_structured_mint_back_mirrors_into_structured_content(capture):
 
 async def test_handler_sees_stripped_args_and_customer_result_untouched(capture):
     """The injected params never reach the tool body, and what the tool returned
-    is exactly what the agent gets back (minus AgentCat's trailing block).
+    is exactly what the agent gets back (minus AgentCat's leading block).
 
     `seen` is filled at the tool manager, not inside `probe`. A typed body can
     only ever report the parameters it declared, and this manager drops an
@@ -166,7 +174,7 @@ async def test_handler_sees_stripped_args_and_customer_result_untouched(capture)
     assert result.isError is False, _text(result)
     assert seen == [("probe", {"text": "payload"})]
     assert result.content[0].text == "probe:payload"
-    # session_id was supplied, so nothing is minted back and nothing is appended.
+    # session_id was supplied, so nothing is minted back and nothing is added.
     assert len(result.content) == 1
     assert _call_events(capture)[0].session_id == sid("supplied")
 
@@ -179,8 +187,9 @@ async def test_get_more_tools_keeps_its_own_context_and_publishes(capture):
         listed = await client.list_tools()
         gmt = next(t for t in listed.tools if t.name == "get_more_tools")
         # Its bespoke `context` is a real parameter: still required, still
-        # described by the tool's own copy — and handles ride alongside.
-        assert gmt.inputSchema["required"] == ["context"]
+        # described by the tool's own copy — and handles ride alongside,
+        # required like everywhere else.
+        assert gmt.inputSchema["required"] == ["context", "session_id"]
         assert "session_id" in gmt.inputSchema["properties"]
         assert read_only_hint(gmt) is True
 
@@ -208,7 +217,9 @@ async def test_agent_tracking_injection(capture):
             "context",
         ]
         assert "agent_id" in add.inputSchema["required"]
-        assert "session_id" not in add.inputSchema["required"]
+        assert "session_id" in add.inputSchema["required"]
+        # agent_id is free-form by design: no pattern in any mode.
+        assert "pattern" not in add.inputSchema["properties"]["agent_id"]
 
         result = await client.call_tool(
             "add_todo", {"text": "with agent", "agent_id": "opus|claude-code|k3n9x"}
@@ -236,15 +247,13 @@ async def test_hook_mode(capture):
 
         r1 = await client.call_tool("add_todo", {"text": "hook one"})
         r2 = await client.call_tool("add_todo", {"text": "hook two"})
-        assert "[MCP INSTRUCTIONS]" not in _text(r1)
-        assert "[MCP INSTRUCTIONS]" not in _text(r2)
+        assert "[session_id" not in _text(r1)
+        assert "[session_id" not in _text(r2)
         # `getattr`, not attribute access: `structuredContent` is a real field
         # from mcp 1.10 and an unset extra before it, and pydantic raises
         # AttributeError for an extra that was never assigned. The claim here
         # is absence either way.
-        assert MCP_INSTRUCTIONS_KEY not in (
-            getattr(r1, "structuredContent", None) or {}
-        )
+        assert MCP_SESSION_KEY not in (getattr(r1, "structuredContent", None) or {})
 
     call_events = _call_events(capture)
     expected = derive_session_id("cust-1", "proj_test")
@@ -268,7 +277,7 @@ async def test_tracing_disabled_strips_but_publishes_nothing(capture):
             "add_todo", {"text": "quiet", "context": "no tracing"}
         )
         assert result.isError is False, _text(result)
-        assert "[MCP INSTRUCTIONS]" not in _text(result)
+        assert "[session_id" not in _text(result)
 
     # Read at the tool manager: `add_todo` is a typed body, which cannot show
     # an argument that arrived and was dropped on the way in.

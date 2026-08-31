@@ -60,8 +60,11 @@ async def test_task_handle_is_minted_then_echoed(v3_http_server, capture_queue):
     async with Client(StreamableHttpTransport(url)) as client:
         first = await client.call_tool("add_todo", {"text": "one"})
         text = "".join(c.text for c in first.content if hasattr(c, "text"))
-        assert "[MCP INSTRUCTIONS]: session_id issued." in text
-        minted = text.split("session_id=")[1].split(" ")[0]
+        assert (
+            "[session_id issued — see this tool's session_id parameter description]"
+            in text
+        )  # noqa: E501
+        minted = text.split("session_id: ")[1].split("\n")[0]
 
         await client.call_tool("add_todo", {"text": "two", "session_id": minted})
 

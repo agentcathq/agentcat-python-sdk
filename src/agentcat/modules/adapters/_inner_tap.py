@@ -98,7 +98,7 @@ from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import Any
 
-from agentcat.modules.exceptions import capture_exception
+from agentcat.modules.exceptions import _safe_str, capture_exception
 from agentcat.modules.logging import write_to_log
 from agentcat.types import ErrorData
 
@@ -202,12 +202,31 @@ class InnerTap:
         an upstream error a proxy passed through, or a tool that returned
         ``is_error`` without anything having been raised at all, both of which
         have no local exception and never will.
+
+        One generation's wrapper is patched up: mcp 2.1 keeps a crash's own
+        text off the wire by raising ``UnexpectedToolError("Error executing
+        tool <name>")`` from it, where every earlier generation put
+        ``: <text>`` after the prefix. The cause still carries the text, so
+        it goes back on the event's message — the wire is not ours to touch —
+        and the message reads the same on every generation. Matched by class
+        name (the class exists only where the policy does) and skipped when
+        the text is already there (a nested crash's wrapper embeds the inner
+        wrapper's, and a future upstream may embed it again).
         """
         # `is not None`, not truthiness: an exception class that defines
         # `__len__` or `__bool__` can be falsy, and losing its traceback to
         # that would be a very quiet bug.
         exc = self._cell.exc
-        return capture_exception(exc if exc is not None else flattened)
+        error = capture_exception(exc if exc is not None else flattened)
+        try:
+            cause = getattr(exc, "__cause__", None)
+            if type(exc).__name__ == "UnexpectedToolError" and cause is not None:
+                text = _safe_str(cause)
+                if text not in error["message"]:
+                    error["message"] = f"{error['message']}: {text}"
+        except Exception:  # a hostile __cause__ costs the suffix, never the event
+            pass
+        return error
 
 
 def inner_tap() -> InnerTap:

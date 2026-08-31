@@ -46,7 +46,9 @@ async def test_a_full_lifecycle_publishes_only_tool_calls(flavor, capture):
         assert {tool.name for tool in listed} == {"echo", GET_MORE_TOOLS_NAME}
 
         first = await flavor.call(client, "echo", {"text": "one"})
-        minted = first.text.split("session_id=")[1].split(" ")[0]
+        # The mint line is "session_id: <id>", on its own line at the START
+        # of the result text (the block is the first content element).
+        minted = first.text.split("session_id: ")[1].split("\n")[0]
         await flavor.call(client, "echo", {"text": "two", SESSION_ID_PARAM: minted})
         # AgentCat answers this one itself, and it is still just a tool call.
         await flavor.call(

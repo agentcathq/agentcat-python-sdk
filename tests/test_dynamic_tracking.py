@@ -66,7 +66,9 @@ class TestDynamicTracking:
             assert "early_tool" in [t.name for t in listed.tools]
 
             result = await client.call_tool("early_tool", {"x": 42})
-            assert result.content[0].text == "42"
+            # content[0] is AgentCat's task mint-back, which every v2 result
+            # carries in front; the tool's own output follows it.
+            assert result.content[1].text == "42"
 
         assert [e.resource_name for e in capture] == ["early_tool"]
         assert get_server_tracking_data(fastmcp_server) is not None
@@ -92,7 +94,7 @@ class TestDynamicTracking:
             result = await client.call_tool(
                 "late_tool", {"x": 123, "context": "late registration"}
             )
-            assert result.content[0].text == "123"
+            assert result.content[1].text == "123"
 
         assert [e.resource_name for e in capture] == ["late_tool"]
         assert capture[0].user_intent == "late registration"
@@ -121,7 +123,7 @@ class TestDynamicTracking:
             )
 
         assert result.isError is False
-        assert result.content[0].text == "Result: 42"
+        assert result.content[1].text == "Result: 42"
         assert seen == [("rebuilt_tool", {"x": 42})]
         # The EVENT still carries the raw pre-strip arguments, by design.
         assert capture[0].parameters["arguments"]["context"] == "no listing yet"
@@ -202,8 +204,13 @@ class TestDynamicTracking:
                 "agent_id",
                 "context",
             ]
-            # session_id is the one injected param that is never required.
-            assert tool.inputSchema["required"] == ["agent_id", "context"]
+            # Every injected param is required — session_id included, with
+            # `start` as its explicit first-call value.
+            assert tool.inputSchema["required"] == [
+                "session_id",
+                "agent_id",
+                "context",
+            ]
 
             # The handler above rejects anything but `value`, so this call
             # only succeeds if both injected parameters were stripped.
@@ -212,7 +219,7 @@ class TestDynamicTracking:
                 {"value": "test123", "agent_id": "a|b|c", "context": "why"},
             )
             assert result.isError is False, result.content
-            assert result.content[0].text == "Low-level result: test123"
+            assert result.content[1].text == "Low-level result: test123"
 
         assert capture[0].tags["agentcat_agent_id"] == "a|b|c"
         assert get_server_tracking_data(lowlevel_server) is not None
@@ -239,7 +246,7 @@ class TestDynamicTracking:
                 "server1_tool"
             ]
             result = await client.call_tool("server1_tool", {"x": 10})
-            assert result.content[0].text == "Server1: 10"
+            assert result.content[1].text == "Server1: 10"
             assert (await client.call_tool("server2_tool", {"x": 1})).isError is True
 
         async with create_test_client(server2) as client:
@@ -248,7 +255,7 @@ class TestDynamicTracking:
                 "server2_tool",
             ]
             result = await client.call_tool("server2_tool", {"x": 20})
-            assert result.content[0].text == "Server2: 20"
+            assert result.content[1].text == "Server2: 20"
 
         assert get_server_tracking_data(server1).project_id == "project1"
         assert get_server_tracking_data(server2).project_id == "project2"

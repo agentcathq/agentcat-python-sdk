@@ -262,7 +262,7 @@ class AgentCatOptions:
     event_properties: EventPropertiesFunction | None = None
     # Default False. Set True to inject a required agent_id parameter into every
     # tool. Agents self-generate the value (model|harness|nonce, e.g.
-    # "opus-4.80-1m|claude-code|k3n9x"); it is echoed back in _mcp_instructions
+    # "opus-4.80-1m|claude-code|k3n9x"); it is echoed back in mcp_session
     # and stamped on events as tags. Omission never rejects a call server-side —
     # the event is simply published without agent identity. The intended
     # enforcement is client-side: a strict schema-validating MCP client will
@@ -294,7 +294,7 @@ class AgentCatData:
     # Per-tool set of parameter names AgentCat injected into the schema
     # (context/session_id/agent_id), so they can be stripped before the tool runs.
     injected_params_registry: dict[str, set[str]] | None = None
-    # Tools whose results receive an _mcp_instructions injection.
+    # Tools whose results receive an mcp_session injection.
     output_injection_registry: set[str] | None = None
     # Tools whose OWN input schema declares `session_id` — the customer's
     # parameter, never ours to read at call time. Membership only ever grows;

@@ -18,14 +18,14 @@ from agentcat.modules.constants import (
     AGENTCAT_TAG_NESTED,
     AGENTCAT_TAG_PROTOCOL_VERSION,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
-    MINT_BACK_CLOSER,
-    MINT_BACK_HEADER_INVALID,
-    MINT_BACK_HEADER_SESSION,
-    MINT_BACK_INVALID_LINE,
+    MCP_SESSION_KEY,
+    MINT_BACK_HEADER_ISSUED,
+    MINT_BACK_HEADER_UNRECOGNIZED,
+    MINT_BACK_ISSUED_BODY,
+    MINT_BACK_UNRECOGNIZED_BODY,
     SESSION_ID_PARAM,
     SESSION_ID_PREFIX,
-    mint_back_confirmed,
+    SESSION_START_SENTINEL,
     mint_back_session_line,
 )
 from agentcat.modules.hooks import run_hook
@@ -184,7 +184,13 @@ async def resolve_handles(
         )
 
     supplied = extract_handle(arguments, SESSION_ID_PARAM)
-    if supplied:
+    # The `start` sentinel is checked BEFORE shape validation and resolves
+    # exactly like an absent value: it is the explicit spelling of "begin a
+    # new task" the required parameter's copy asks for. Case-insensitive
+    # (extract_handle already trimmed), and only ever read here — a foreign
+    # customer-owned value took the branch above, so `start` in a parameter
+    # the customer declared is never interpreted as a sentinel.
+    if supplied and supplied.lower() != SESSION_START_SENTINEL:
         if is_valid_session_id(supplied):
             return HandleResolution(
                 supplied,
@@ -210,39 +216,24 @@ async def resolve_handles(
     )
 
 
-def _echoes_session_id(res: HandleResolution) -> bool:
-    """Whether the agent has an AgentCat `session_id` value to echo back.
-
-    Three ways to have none: hook mode and the no-parameter cases collapsed
-    into `prompts_session_id`, plus `invalid` — where the parameter is ours
-    but there is no value to confirm. That branch corrects the agent rather
-    than issuing a replacement, so naming a `session_id` would be a lie.
-    """
-    return (
-        res.prompts_session_id and not res.hook_mode and res.session_source != "invalid"
-    )
-
-
 def build_mint_back_text(res: HandleResolution) -> str | None:
     if res.hook_mode or not res.prompts_session_id:
         return None
     if res.session_source == "minted":
         return "\n".join(
             [
-                MINT_BACK_HEADER_SESSION,
+                MINT_BACK_HEADER_ISSUED,
                 mint_back_session_line(res.session_id),
-                MINT_BACK_CLOSER,
+                MINT_BACK_ISSUED_BODY,
             ]
         )
     if res.session_source == "invalid":
         # No replacement is handed out. An agent that sent something was
         # usually already issued a good ID, and giving it a second one splits a
         # session that was never split. The closing sentence of
-        # MINT_BACK_INVALID_LINE is the way out for the agent that was never
-        # issued one: omit the parameter and take the `minted` branch.
-        return "\n".join(
-            [MINT_BACK_HEADER_INVALID, MINT_BACK_INVALID_LINE, MINT_BACK_CLOSER]
-        )
+        # MINT_BACK_UNRECOGNIZED_BODY is the way out for the agent that was
+        # never issued one: send `start` and take the `minted` branch.
+        return "\n".join([MINT_BACK_HEADER_UNRECOGNIZED, MINT_BACK_UNRECOGNIZED_BODY])
     return None
 
 
@@ -251,7 +242,9 @@ def build_structured_mint_back(res: HandleResolution) -> dict[str, Any] | None:
 
     Unlike `build_mint_back_text` (mint announcements only), this is present
     on EVERY response, so an agent can re-read its own handles mid-session.
-    Handles the agent cannot echo are never named.
+    Handles the agent cannot echo are never named: `status` and `session_id`
+    appear only in prompted mode — hook mode and a customer-owned session
+    parameter mirror `agent_id` alone.
 
     Suppression is per-HANDLE, not per-response: a `session_id` collision skips
     only `session_id`. `agent_id` is a separate injection and still landed in
@@ -259,33 +252,34 @@ def build_structured_mint_back(res: HandleResolution) -> dict[str, Any] | None:
     mirror would withhold a handle AgentCat issued purely because a
     neighbouring one belongs to the customer.
     """
-    echoes = _echoes_session_id(res)
-    names: list[str] = []
-    if echoes:
-        names.append(SESSION_ID_PARAM)
-    if res.agent_id:
-        names.append(AGENT_ID_PARAM)
-    text = build_mint_back_text(res)
-    # `not names` alone would drop the `invalid` correction whenever no
-    # agent_id is in play — the one branch that has something to say and
-    # nothing to echo.
-    if not names and not text:
-        return None
+    prompted = res.prompts_session_id and not res.hook_mode
     mint: dict[str, Any] = {}
-    if echoes:
+    if prompted and res.session_source in ("minted", "supplied"):
+        # `invalid` names no session_id: no replacement is issued, and the
+        # recovery path is described under `status`.
         mint[SESSION_ID_PARAM] = res.session_id
     if res.agent_id:
         mint[AGENT_ID_PARAM] = res.agent_id
-    mint["instructions"] = text or mint_back_confirmed(names)
+    if prompted:
+        if res.session_source == "minted":
+            mint["status"] = "issued"
+        elif res.session_source == "supplied":
+            mint["status"] = "active"
+        elif res.session_source == "invalid":
+            mint["status"] = "unrecognized"
+    if not mint:
+        return None
     return mint
 
 
 def mirror_into_structured_content(
     sc: Any, mint: dict[str, Any]
 ) -> dict[str, Any] | None:
-    if not isinstance(sc, dict) or MCP_INSTRUCTIONS_KEY in sc:
+    if not isinstance(sc, dict) or MCP_SESSION_KEY in sc:
         return None
-    return {**sc, MCP_INSTRUCTIONS_KEY: mint}
+    # Mirror first: an ID at the tail of a long payload is what clients
+    # truncate away.
+    return {MCP_SESSION_KEY: mint, **sc}
 
 
 def _clamp_tag_value(value: str) -> str:

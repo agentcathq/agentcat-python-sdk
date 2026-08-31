@@ -111,7 +111,8 @@ async def resolve_call(
     A tool absent from `declared_session_params` is ours — including one this
     instance never listed. That is the common case on stateless HTTP and it
     degrades safely: a customer's foreign value in that window is classified
-    `invalid` rather than `foreign`, and both publish sessionless.
+    `invalid` rather than `foreign`, and both publish sessionless (a value
+    spelling `start` instead mints, exactly as on a parameter we injected).
     """
     resolution = await resolve_handles(
         raw_arguments,
@@ -157,9 +158,10 @@ async def get_stripped_arguments(
     rebuild falls back to the shape+config-aware strip (see
     `injected_parameter_names`): a name is removed only when the enabled
     options would have injected it AND, for `session_id`, the value matches
-    our minted shape — a customer-declared parameter rides through to their
-    handler. The fallback also clears the output-injection registry, so the
-    structured mirror stops gating on knowledge we no longer have (§3.4b).
+    our minted shape or the `start` sentinel — a customer-declared parameter
+    rides through to their handler. The fallback also clears the
+    output-injection registry, so the structured mirror stops gating on
+    knowledge we no longer have (§3.4b).
     """
     registry = data.injected_params_registry
     if registry is None and rebuild is not None:
@@ -224,19 +226,20 @@ def decorate_content(
     res: HandleResolution,
     make_text_block: Callable[[str], Any],
 ) -> list[Any] | None:
-    """The trailing mint-back block, or None to leave the result untouched.
+    """The leading mint-back block, or None to leave the result untouched.
 
-    Error state is deliberately not an input: the retry after a failure has to
-    carry the same session, so `isError` results decorate on identical terms
-    (§3.4a). Whether there is anything to say at all stays the single ruling of
-    `build_mint_back_text` — a session minted on this call, or a supplied one
-    this server never issued; never in hook mode, and never for a parameter
-    AgentCat did not inject.
+    Prepended, not appended: an ID at the tail of a long result is what
+    clients truncate away. Error state is deliberately not an input: the retry
+    after a failure has to carry the same session, so `isError` results
+    decorate on identical terms (§3.4a). Whether there is anything to say at
+    all stays the single ruling of `build_mint_back_text` — a session minted
+    on this call, or a supplied one this server never issued; never in hook
+    mode, and never for a parameter AgentCat did not inject.
     """
     text = build_mint_back_text(res)
     if text is None or not isinstance(content, list):
         return None
-    return [*content, make_text_block(text)]
+    return [make_text_block(text), *content]
 
 
 def structured_mirror(

@@ -14,7 +14,7 @@ from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import (
     AGENTCAT_TAG_NESTED,
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
+    MCP_SESSION_KEY,
 )
 
 from .test_utils.community_catalog_server import (
@@ -34,7 +34,7 @@ pytestmark = pytest.mark.skipif(
     reason="Community FastMCP with CatalogTransform not available",
 )
 
-MINT_BACK_HEADER = "[MCP INSTRUCTIONS]: session_id issued."
+MINT_BACK_HEADER = "[session_id issued — see this tool's session_id parameter description]"  # noqa: E501
 CONTEXT = "Driving the hidden catalog through the meta tool to exercise nesting"
 
 
@@ -67,7 +67,7 @@ async def test_the_echoed_session_id_still_strips_after_a_nested_call(capture):
         assert {"session_id", "context"} <= set(run_tool.input_schema["properties"])
 
         r1 = await client.call_tool("run", {"program": "first", "context": CONTEXT})
-        minted = _text(r1).split("session_id=")[1].split(" ")[0]
+        minted = _text(r1).split("session_id: ")[1].split("\n")[0]
         assert minted.startswith("ses_")
 
         # A raise here is the regression: the nested catalog fetch inside call
@@ -105,5 +105,5 @@ async def test_a_nested_call_joins_the_session_and_is_never_decorated(capture):
     )
     # ...while the outer wire result keeps both mint-back forms.
     assert MINT_BACK_HEADER in _text(result)
-    mint = result.structured_content[MCP_INSTRUCTIONS_KEY]
+    mint = result.structured_content[MCP_SESSION_KEY]
     assert mint["session_id"] == outer.session_id

@@ -91,6 +91,25 @@ NEEDS_CONCURRENT_DISPATCH = pytest.mark.skipif(
 )
 
 
+# mcp 2.1 split the MCPServer tool-crash wrapper out of `ToolError` into an
+# `UnexpectedToolError` subclass and, in the same change, stopped copying the
+# crash's own text into the wrapper: the model sees only `Error executing
+# tool <name>`, and the original rides `__cause__`. The tap restores that
+# text on the published EVENT (`InnerTap.error`), so only the type name and
+# the wire differ by generation. Probed on the symbol rather than the version
+# so a backport is honoured; mcp 1.x has no `mcpserver` package at all and
+# takes the same fallback, which `MODERN_ONLY` then skips.
+try:
+    from mcp.server.mcpserver.exceptions import (
+        UnexpectedToolError as _UnexpectedToolError,
+    )
+except ImportError:
+    MCPSERVER_CRASH_WRAPPER = "ToolError"
+    MCPSERVER_CRASH_TEXT_ON_WIRE = True
+else:
+    MCPSERVER_CRASH_WRAPPER = _UnexpectedToolError.__name__
+    MCPSERVER_CRASH_TEXT_ON_WIRE = False
+
 # Whether the installed community FastMCP models an error result at all.
 # `ToolResult.is_error` arrived in fastmcp 3.4 (PR #4217); below it a plain
 # `ToolResult` dumps three fields and carries no error key in either spelling.

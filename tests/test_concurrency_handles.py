@@ -26,8 +26,8 @@ import pytest
 from agentcat import AgentCatOptions, track
 from agentcat.modules.constants import (
     AGENTCAT_TAG_SESSION_SOURCE,
-    MCP_INSTRUCTIONS_KEY,
-    MINT_BACK_HEADER_SESSION,
+    MCP_SESSION_KEY,
+    MINT_BACK_HEADER_ISSUED,
     SESSION_ID_PARAM,
 )
 
@@ -107,7 +107,7 @@ async def test_simultaneous_calls_never_cross_attribute_a_handle(flavor, capture
         listed = await flavor.list_tools(client)
         echo = next(tool for tool in listed if tool.name == "echo")
         assert SESSION_ID_PARAM in echo.input_schema["properties"]
-        assert MCP_INSTRUCTIONS_KEY in (echo.output_schema or {})["properties"]
+        assert MCP_SESSION_KEY in (echo.output_schema or {})["properties"]
 
         results = await asyncio.wait_for(
             asyncio.gather(
@@ -132,14 +132,14 @@ async def test_simultaneous_calls_never_cross_attribute_a_handle(flavor, capture
     for index, result in enumerate(results):
         mine = _session_id(index)
         assert result.text.startswith(f"echo:t{index:02d}")
-        assert result.structured[MCP_INSTRUCTIONS_KEY][SESSION_ID_PARAM] == mine
+        assert result.structured[MCP_SESSION_KEY][SESSION_ID_PARAM] == mine
         # Nobody else's handle is anywhere in this response.
         dumped = json.dumps(result.structured) + result.text
         others = [_session_id(other) for other in range(TOTAL) if other != index]
         assert not [handle for handle in others if handle in dumped]
         # Every handle was supplied, so nothing was minted and no mint-back
         # text block exists to name one.
-        assert MINT_BACK_HEADER_SESSION not in result.text
+        assert MINT_BACK_HEADER_ISSUED not in result.text
 
     # ── what AgentCat published ──────────────────────────────────────────────
     events = _call_events(capture)
@@ -185,10 +185,10 @@ async def test_simultaneous_calls_each_mint_their_own_handle(flavor, capture):
     }
     assert len(set(published.values())) == TOTAL, "two calls minted one handle"
     for index, result in enumerate(results):
-        minted = result.structured[MCP_INSTRUCTIONS_KEY][SESSION_ID_PARAM]
+        minted = result.structured[MCP_SESSION_KEY][SESSION_ID_PARAM]
         assert minted.startswith("ses_")
         # The handle in the mint-back text and the one in the mirror are the
         # same object of trust the agent echoes back, and the event has to be
         # keyed on it.
-        assert f"session_id={minted} " in result.text
+        assert f"session_id: {minted}\n" in result.text
         assert published[f"t{index:02d}"] == minted

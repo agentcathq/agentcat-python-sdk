@@ -7,6 +7,10 @@ wire and splits customer sessions across an upgrade. Fix the implementation,
 never the literal.
 """
 
+from agentcat.modules.constants import (
+    MINT_BACK_HEADER_ISSUED,
+    MINT_BACK_ISSUED_BODY,
+)
 from agentcat.modules.handles import (
     HandleResolution,
     build_handle_tags,
@@ -78,6 +82,53 @@ async def test_prompted_supplied_vs_minted():
     assert (r1.session_id, r1.session_source, r1.hook_mode) == (sid("supplied"), "supplied", False)  # noqa: E501
     r2 = await resolve_handles({}, o, "proj", None, None)
     assert r2.session_source == "minted" and r2.session_id.startswith("ses_")
+
+
+async def test_the_start_sentinel_resolves_exactly_like_omission():
+    """`start` is the explicit spelling of "begin a new task".
+
+    It resolves on the minted path with the minted announcement — session
+    source, status, and text block all identical to an omitted session_id —
+    and it is read off the trimmed value case-insensitively, checked BEFORE
+    shape validation, so it can never fall through to `invalid`.
+    """
+    o = AgentCatOptions()
+    for value in ("start", "Start", "START", "  start  ", "\tSTART \n"):
+        r = await resolve_handles({"session_id": value}, o, "proj", None, None)
+        assert r.session_source == "minted", value
+        assert r.session_id.startswith("ses_") and r.prompts_session_id is True
+        text = build_mint_back_text(r)
+        assert text is not None and text.startswith(MINT_BACK_HEADER_ISSUED)
+        assert build_structured_mint_back(r) == {
+            "session_id": r.session_id,
+            "status": "issued",
+        }
+
+
+async def test_each_start_begins_a_new_unrelated_task():
+    # The copy warns "start always begins a new, unrelated task" — so two
+    # sentinel calls must never share a session.
+    o = AgentCatOptions()
+    a = await resolve_handles({"session_id": "start"}, o, "proj", None, None)
+    b = await resolve_handles({"session_id": "start"}, o, "proj", None, None)
+    assert a.session_id != b.session_id
+
+
+async def test_start_in_a_foreign_param_is_never_a_sentinel():
+    # The sentinel is only ever read from OUR parameter. A customer tool whose
+    # own schema declares session_id keeps every value — `start` included —
+    # and stays sessionless, exactly like any other foreign value.
+    r = await resolve_handles(
+        {"session_id": "start"},
+        AgentCatOptions(),
+        "proj",
+        None,
+        None,
+        frozenset(),
+        session_param_is_ours=False,
+    )
+    assert (r.session_source, r.session_id) == ("foreign", "")
+    assert build_mint_back_text(r) is None
 
 
 # TS handles.test.ts:248-271 — the agent is never minted server-side, so an
@@ -276,7 +327,9 @@ async def test_the_gate_is_per_handle():
     # customer's own value back to the agent.
     mint = build_structured_mint_back(r)
     assert mint is not None and "session_id" not in mint
-    assert mint["agent_id"] == "agt|x|1"
+    # `status` is prompted-mode-only vocabulary; a foreign session param
+    # mirrors the agent handle alone.
+    assert mint == {"agent_id": "agt|x|1"}
     assert "SESSION-1234" not in str(mint)
 
 
@@ -333,9 +386,7 @@ async def test_agent_extraction_gated_on_option():
 def test_mint_back_text_rules():
     minted = HandleResolution(session_id=sid("T"), session_source="minted")
     assert build_mint_back_text(minted) == (
-        "[MCP INSTRUCTIONS]: session_id issued.\n"
-        f"  session_id={sid('T')} — required on every subsequent tool call\n"
-        "Without session_id, this server does not function as intended."
+        f"{MINT_BACK_HEADER_ISSUED}\nsession_id: {sid('T')}\n{MINT_BACK_ISSUED_BODY}"
     )
     assert build_mint_back_text(HandleResolution(sid("T"), "supplied")) is None
     assert build_mint_back_text(HandleResolution(sid("T"), "minted", hook_mode=True)) is None  # noqa: E501
@@ -355,55 +406,53 @@ def test_mint_back_text_ignores_a_supplied_agent():
 def test_structured_mint_back_omission_rules():
     both = HandleResolution(sid("T"), "supplied", agent_id="A", agent_source="supplied")
     m = build_structured_mint_back(both)
-    assert m == {
-        "session_id": sid("T"),
-        "agent_id": "A",
-        "instructions": "[MCP INSTRUCTIONS]: session_id and agent_id confirmed. Keep sending these exact values on every call.",  # noqa: E501
-    }
+    assert m == {"session_id": sid("T"), "agent_id": "A", "status": "active"}
     hook_agent = HandleResolution(
         sid("T"), "hook", agent_id="A", agent_source="supplied", hook_mode=True
     )
+    # Hook mode carries the agent handle alone — no session_id, no status.
     m = build_structured_mint_back(hook_agent)
-    assert "session_id" not in m and m["agent_id"] == "A" and "agent_id confirmed" in m["instructions"]  # noqa: E501
+    assert m == {"agent_id": "A"}
     assert build_structured_mint_back(HandleResolution(sid("T"), "hook", hook_mode=True)) is None  # noqa: E501
     minted = HandleResolution(sid("T"), "minted")
-    assert build_structured_mint_back(minted)["instructions"].startswith("[MCP INSTRUCTIONS]: session_id issued.")  # noqa: E501
+    assert build_structured_mint_back(minted) == {
+        "session_id": sid("T"),
+        "status": "issued",
+    }
 
 
 # TS handles.test.ts:428-441 — a minted task with a supplied agent echoes both
-# ids but keeps the issued (not confirmed) copy, and never claims to have
-# issued an agent_id.
+# ids; `status` reports the session only, and never claims an agent_id was
+# issued (the agent's value is echoed as received).
 def test_structured_mint_back_minted_task_with_supplied_agent():
     m = build_structured_mint_back(
         HandleResolution(sid("T"), "minted", agent_id=A, agent_source="supplied")
     )
-    assert m["session_id"] == sid("T") and m["agent_id"] == A
-    assert "session_id issued" in m["instructions"]
-    assert "agent_id issued" not in m["instructions"]
+    assert m == {"session_id": sid("T"), "agent_id": A, "status": "issued"}
 
 
-# TS handles.test.ts:458-469 — agent tracking off: task only, singular copy.
-def test_structured_mint_back_task_only_uses_singular_confirmed_copy():
+# TS handles.test.ts:458-469 — agent tracking off: task only.
+def test_structured_mint_back_task_only():
     m = build_structured_mint_back(HandleResolution(sid("T"), "supplied"))
-    assert m == {
-        "session_id": sid("T"),
-        "instructions": "[MCP INSTRUCTIONS]: session_id confirmed. Keep sending this exact value on every call.",  # noqa: E501
-    }
+    assert m == {"session_id": sid("T"), "status": "active"}
 
 
 def test_mirror_rules():
-    mint = {"session_id": sid("T"), "instructions": "i"}
+    mint = {"session_id": sid("T"), "status": "issued"}
     assert mirror_into_structured_content(None, mint) is None
     assert mirror_into_structured_content([1], mint) is None
-    assert mirror_into_structured_content({"_mcp_instructions": "customer"}, mint) is None  # noqa: E501
+    assert mirror_into_structured_content({"mcp_session": "customer"}, mint) is None
     out = mirror_into_structured_content({"a": 1}, mint)
-    assert out == {"a": 1, "_mcp_instructions": mint}
+    assert out == {"a": 1, "mcp_session": mint}
+    # Mirror FIRST: an ID at the tail of a long payload is what clients
+    # truncate away.
+    assert list(out) == ["mcp_session", "a"]
 
 
 # TS handles.test.ts:498-516 — customer objects are never mutated, and any
 # non-plain-object structured content is left alone.
 def test_mirror_never_mutates_and_skips_non_mappings():
-    mint = {"session_id": sid("T"), "instructions": "i"}
+    mint = {"session_id": sid("T"), "status": "issued"}
     sc = {"a": 1}
     out = mirror_into_structured_content(sc, mint)
     assert sc == {"a": 1} and out is not sc

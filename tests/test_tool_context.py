@@ -7,8 +7,8 @@ receives the `session_id` handle, so the injected property order is
 `context` stays REQUIRED, as it was in 1.x. Nothing server-side rejects a call
 that omits it — a schema-validating client refusing to send one is the whole
 enforcement mechanism, and without it agents quietly stop supplying intent.
-`session_id` is the one injected parameter that is never required: omitting it is
-how an agent asks to be minted one.
+`session_id` is required the same way, with `start` as its explicit first-call
+value; an absent value still mints, so a stale schema never errors.
 """
 
 import time
@@ -53,8 +53,9 @@ class TestToolContext:
             # Required, as in 1.x: a strict client refusing to send a call
             # without it is the only thing that makes agents supply intent.
             assert "context" in tool.inputSchema["required"]
-            # ...and session_id is not, because omitting it is the mint signal.
-            assert "session_id" not in tool.inputSchema.get("required", [])
+            # ...and so is session_id, whose copy names start as the value
+            # that asks to be minted one.
+            assert "session_id" in tool.inputSchema["required"]
 
     @pytest.mark.asyncio
     async def test_context_parameter_not_injected_when_disabled(self):
@@ -94,7 +95,7 @@ class TestToolContext:
         simple = _named(await _tools(mcp), "simple_tool")
         assert simple.inputSchema is not None
         assert "context" in simple.inputSchema["properties"]
-        assert simple.inputSchema["required"] == ["context"]
+        assert simple.inputSchema["required"] == ["session_id", "context"]
 
     @pytest.mark.asyncio
     async def test_schema_with_empty_properties(self):
@@ -118,7 +119,7 @@ class TestToolContext:
         track(server, "test_project", AgentCatOptions(enable_tool_call_context=True))
 
         add_todo = _named(await _tools(server), "add_todo")
-        assert add_todo.inputSchema["required"] == ["text", "context"]
+        assert add_todo.inputSchema["required"] == ["text", "session_id", "context"]
 
     @pytest.mark.asyncio
     async def test_schema_with_no_required_fields(self):
@@ -133,10 +134,10 @@ class TestToolContext:
         track(mcp, "test_project", AgentCatOptions(enable_tool_call_context=True))
 
         tool = _named(await _tools(mcp), "optional_params_tool")
-        assert tool.inputSchema["required"] == ["context"]
+        assert tool.inputSchema["required"] == ["session_id", "context"]
 
-        # With the context pass off there is nothing to require at all, so the
-        # tool's own (absent) required array is left absent.
+        # With the context pass off, the handle pass still requires the
+        # session_id it injected — requiredness rides injection exactly.
         untouched = FastMCP("test-server-2")
 
         @untouched.tool()
@@ -148,7 +149,7 @@ class TestToolContext:
             untouched, "test_project", AgentCatOptions(enable_tool_call_context=False)
         )
         listed = _named(await _tools(untouched), "other_tool")
-        assert listed.inputSchema.get("required", []) == []
+        assert listed.inputSchema.get("required", []) == ["session_id"]
 
     @pytest.mark.asyncio
     async def test_server_with_no_tools(self):
@@ -173,7 +174,7 @@ class TestToolContext:
         get_more_tools = _named(tools, "get_more_tools")
         context_schema = get_more_tools.inputSchema["properties"]["context"]
         assert context_schema["description"] != DEFAULT_CONTEXT_DESCRIPTION
-        assert get_more_tools.inputSchema["required"] == ["context"]
+        assert get_more_tools.inputSchema["required"] == ["context", "session_id"]
 
         for tool in tools:
             if tool.name == "get_more_tools":
@@ -254,7 +255,9 @@ class TestToolContext:
             result = await client.call_tool(
                 "tool_with_context", {"context": "mine", "data": "d"}
             )
-        assert "Original context: mine" in result.content[0].text
+        # content[0] is AgentCat's task mint-back, which every v2 result
+        # carries in front; the tool's own output follows it.
+        assert "Original context: mine" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_schema_with_allof_anyof_oneof(self):
@@ -321,7 +324,7 @@ class TestToolContext:
                 },
             )
 
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
 
     @pytest.mark.asyncio
     async def test_tool_call_without_context_still_succeeds(self):
@@ -332,7 +335,7 @@ class TestToolContext:
         async with create_test_client(server) as client:
             result = await client.call_tool("add_todo", {"text": "Test todo item"})
 
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -361,7 +364,7 @@ class TestToolContext:
             )
 
         assert result.isError is False
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
         assert delivered_arguments_for(server, "add_todo") == [{"text": "Test todo"}]
 
     @pytest.mark.asyncio
@@ -381,13 +384,13 @@ class TestToolContext:
             list_result = await client.call_tool(
                 "list_todos", {"context": "Listing all todos to verify they were added"}
             )
-            assert "First todo" in list_result.content[0].text
-            assert "Second todo" in list_result.content[0].text
+            assert "First todo" in list_result.content[1].text
+            assert "Second todo" in list_result.content[1].text
 
             complete_result = await client.call_tool(
                 "complete_todo", {"id": 1, "context": "Completing the first todo"}
             )
-            assert "Completed todo" in complete_result.content[0].text
+            assert "Completed todo" in complete_result.content[1].text
 
     @pytest.mark.asyncio
     async def test_context_not_passed_to_original_handler(self):
@@ -407,7 +410,7 @@ class TestToolContext:
             )
 
         assert result.isError is False
-        assert "Added todo" in result.content[0].text
+        assert "Added todo" in result.content[1].text
         assert delivered_arguments_for(server, "add_todo") == [{"text": "test data"}]
 
     @pytest.mark.asyncio
@@ -579,7 +582,7 @@ class TestToolContext:
                     "context": "Adding todo to test custom context description feature",
                 },
             )
-            assert "Added todo" in result.content[0].text
+            assert "Added todo" in result.content[1].text
 
 
 class TestGetMoreToolsContextSchema:
