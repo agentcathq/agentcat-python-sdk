@@ -76,6 +76,42 @@ async def test_counts_survive_redaction_and_truncation(flavor, capture, monkeypa
 
 
 @pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
+async def test_counts_survive_truncation(flavor, capture, monkeypatch):
+    """{"text":"xxx...x"} (60000 x's) is 60011 bytes -> ceil(60011/3.5) = 17146
+    exactly. The echo of it, "echo:" + 60000 x's, is 60005 bytes ->
+    ceil(60005/3.5) = 17145. The brief's original 40000-x vector (11432 /
+    11430) does not reliably push every flavor's serialized event past
+    truncation.MAX_EVENT_BYTES (100KB) — some flavors mirror the answer into
+    `structuredContent` too and some do not, so only the larger payload
+    guarantees size-targeted truncation fires on every flavor. The published
+    response text ends up well below the original 60005 characters, and the
+    counts still describe the original, untruncated bytes.
+    """
+    sent: list = []
+    monkeypatch.setattr(event_queue.event_queue, "_send_event", sent.append)
+
+    built = flavor.build("token-estimates-truncated")
+    track(built.server, "proj_test", AgentCatOptions())
+
+    long_text = "x" * 60000
+    async with flavor.client(built.server) as client:
+        await flavor.list_tools(client)
+        await flavor.call(client, "echo", {"text": long_text})
+
+    queued = capture[0]
+    # Drive the real pipeline (sanitize -> truncate -> send) on the captured
+    # event, exactly as the worker thread would.
+    event_queue.event_queue._process_event(queued)
+
+    assert len(sent) == 1
+    published = sent[0]
+    published_text = published.response["content"][0]["text"]
+    assert len(published_text) < 60005
+    assert published.input_tokens == 17146
+    assert published.output_tokens == 17145
+
+
+@pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
 async def test_a_broken_estimator_never_breaks_the_tool_call(flavor, capture, monkeypatch):
     """The estimator runs inside the customer's request. Force it to raise
     and the client must still receive the tool's own answer; the call's

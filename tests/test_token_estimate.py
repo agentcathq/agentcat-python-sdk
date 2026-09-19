@@ -47,9 +47,18 @@ def test_absent_arguments_are_omitted():
     assert estimate_input_tokens(None) is None
 
 
-def test_unserializable_arguments_fall_back_to_str():
-    # default=str keeps an odd value countable rather than dropping the field.
-    assert estimate_input_tokens({"when": object()}) is not None
+def test_lone_surrogate_counts_three_bytes_on_the_input_side():
+    # A lone surrogate off the wire (json.loads on an unpaired \ud83d escape)
+    # must count, not be omitted: surrogatepass encodes it to 3 bytes, the
+    # same width Go counts after its decoder substitutes U+FFFD.
+    # {"a":"<surrogate>"} = 6 + 3 + 2 = 11 bytes -> ceil(11 / 3.5) = 4.
+    assert estimate_input_tokens({"a": "\ud83d"}) == 4
+
+
+def test_unserializable_arguments_are_omitted():
+    # No default=str: TypeScript and Go both omit an unserializable value
+    # rather than counting a stand-in string, so Python must match.
+    assert estimate_input_tokens({"when": object()}) is None
 
 
 class _Hostile:
@@ -63,7 +72,9 @@ class _HostileResponse(dict):
 
 
 def test_never_raises_on_the_input_side():
-    # default=str calls __str__, which raises: the field is omitted, not the call.
+    # json.dumps raises TypeError on an unserializable value before __str__
+    # is ever consulted (no default=str); the field is omitted either way,
+    # so a hostile __str__ never gets the chance to raise into the call.
     assert estimate_input_tokens({"when": _Hostile()}) is None
 
 
@@ -96,6 +107,11 @@ def test_estimate_output_tokens(response, tokens):
 
 def test_no_content_list_falls_back_to_the_whole_response():
     assert estimate_output_tokens({"result": "ok"}) == 5
+
+
+def test_lone_surrogate_counts_three_bytes_on_the_output_side():
+    # A lone surrogate is 3 bytes -> ceil(3 / 3.5) = 1.
+    assert estimate_output_tokens({"content": [text("\ud83d")]}) == 1
 
 
 def test_absent_response_is_omitted():

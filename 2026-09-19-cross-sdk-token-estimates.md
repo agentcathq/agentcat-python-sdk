@@ -20,7 +20,10 @@ The compact JSON of the raw, unstripped `arguments` object, injected
 parameters included. Compact separators, no ASCII escaping
 (`ensure_ascii=False`), no HTML escaping (`SetEscapeHTML(false)`), no trailing
 newline. Not the tool name, `_meta`, `extra`, or the JSON-RPC envelope.
-Absent or null arguments → field omitted. `{}` → 1.
+Absent or null arguments → field omitted. `{}` → 1. Adapters that cannot
+tell absent arguments from an empty object (Python's three adapters and the
+Go official-SDK adapter, which hand the funnel a map either way) count `{}`
+→ 1; TypeScript and Go mcp-go omit.
 
 ## Output side: `output_tokens`
 
@@ -28,7 +31,16 @@ The summed UTF-8 bytes of `text` blocks and string `resource.text` values in
 `content`, divided once. Image, audio, blob and unknown blocks count 0. Not
 `structuredContent`, `isError`, `_meta`, the envelope, or the mint-back text.
 No `content` list → the compact JSON of the whole recorded response. Absent
-response → field omitted. Content with no text-bearing block → 0.
+response → field omitted. Content with no text-bearing block → 0. The Go
+adapters record no `Response` on `isError` results, so Go omits
+`output_tokens` there while TypeScript and Python count the error text.
+
+## Serialization corner cases
+
+Non-canonical numbers (`1.0`; integers at or above 1e21, which
+`JSON.stringify` writes as `1e+21`) and U+2028/U+2029 (Go always escapes
+them to six bytes) can differ by a byte or two between SDKs, all within ±1
+token. Lone surrogates count 3 bytes in every SDK.
 
 ## Ordering
 

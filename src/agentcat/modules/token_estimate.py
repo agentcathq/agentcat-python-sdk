@@ -31,19 +31,25 @@ def estimate_tokens(byte_count: int) -> int:
 
 
 def _utf8_len(text: str) -> int:
-    return len(text.encode("utf-8"))
+    # surrogatepass: a lone surrogate off the wire (json.loads on a string
+    # containing an unpaired \udXXX escape) must still be counted, not
+    # dropped. TypeScript and Go's decoders substitute U+FFFD (3 bytes) for
+    # the same input; surrogatepass encodes a lone surrogate to the same 3
+    # bytes, so the byte count matches across SDKs.
+    return len(text.encode("utf-8", errors="surrogatepass"))
 
 
 def _compact_json_bytes(value: Any) -> int | None:
     """UTF-8 length of the compact JSON: no spaces, no ASCII escaping.
 
     ``ensure_ascii=False`` matters: the default would spell ``café`` as
-    ``caf\\u00e9`` and count 20 bytes where TypeScript and Go count 16.
+    ``caf\\u00e9`` and count 20 bytes where TypeScript and Go count 16. No
+    ``default=str``: an unserializable value must be omitted, matching
+    TypeScript and Go, which also drop the field rather than counting a
+    stand-in string.
     """
     try:
-        text = json.dumps(
-            value, separators=(",", ":"), ensure_ascii=False, default=str
-        )
+        text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
     except Exception:
         return None
     return _utf8_len(text)
