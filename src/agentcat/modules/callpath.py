@@ -56,6 +56,8 @@ from agentcat.types import (
     UserIdentity,
 )
 
+from .token_estimate import estimate_input_tokens, estimate_output_tokens
+
 # A failed call whose adapter could make nothing of the failure. Same shape as
 # every other error payload so consumers never have to branch on presence.
 _UNKNOWN_ERROR: ErrorData = {
@@ -305,6 +307,10 @@ async def publish_tool_call_event(
             is_error=is_error,
             error=(error or _UNKNOWN_ERROR) if is_error else None,
             duration=duration_ms,
+            # Estimated on the raw payloads here, before the queue's redaction
+            # hooks run; the queue never recomputes them.
+            input_tokens=estimate_input_tokens(raw_arguments),
+            output_tokens=estimate_output_tokens(response),
             client_name=rc.client.name,
             client_version=rc.client.version,
             identify_actor_given_id=rc.actor.user_id if rc.actor else None,
