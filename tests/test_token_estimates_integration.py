@@ -39,6 +39,102 @@ async def test_tool_call_events_carry_token_estimates(flavor, capture):
     assert event.output_tokens == 4
 
 
+def _build_structured_only_server(flavor_id: str):
+    """A fresh, untracked server whose lone tool answers with an empty
+    ``content`` list and a ``structuredContent``/``structured_content`` of
+    ``{"result": "ok"}`` — no auto-mirrored text block.
+
+    Each era's facade normally derives a text content block from a typed
+    return value, so this bypasses that conversion the way the era itself
+    allows: ``MCPServer`` and the community ``fastmcp`` both pass a
+    already-built result object straight through their `convert_result`
+    (`mcp.server.mcpserver.utilities.func_metadata.FuncMetadata.convert_result`,
+    `fastmcp.tools.base.Tool.convert_result`) instead of re-deriving content
+    from it, and the lowlevel `Server`'s `on_call_tool` callback is returned
+    to the wire completely unmodified.
+    """
+    if flavor_id == "mcpserver-v2":
+        from mcp.server.mcpserver import MCPServer
+        from mcp.types import CallToolResult
+
+        server = MCPServer("structured-only")
+
+        @server.tool()
+        async def structured_only() -> CallToolResult:
+            return CallToolResult(content=[], structured_content={"result": "ok"})
+
+        return server
+
+    if flavor_id == "lowlevel-v2":
+        from mcp import types
+        from mcp.server import Server
+
+        async def on_list_tools(ctx, params):
+            return types.ListToolsResult(
+                tools=[
+                    types.Tool(
+                        name="structured_only",
+                        description="",
+                        input_schema={"type": "object", "properties": {}},
+                    )
+                ]
+            )
+
+        async def on_call_tool(ctx, params):
+            return types.CallToolResult(content=[], structured_content={"result": "ok"})
+
+        return Server(
+            "structured-only", on_list_tools=on_list_tools, on_call_tool=on_call_tool
+        )
+
+    if flavor_id.startswith("community-"):
+        from fastmcp import FastMCP
+        from fastmcp.tools.base import ToolResult
+
+        server = FastMCP("structured-only")
+
+        @server.tool
+        async def structured_only() -> ToolResult:
+            return ToolResult(content=[], structured_content={"result": "ok"})
+
+        return server
+
+    return None
+
+
+@pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
+async def test_structured_only_result_counts_the_structured_content(flavor, capture):
+    """When a result's `content` list is empty and it carries a structured
+    value, `output_tokens` counts that value's compact JSON instead of 0.
+
+    Not every flavor's facade can be made to answer with an empty `content`
+    list without going around its typed-return conversion; flavors that
+    cannot are skipped here rather than faked, per the design brief.
+    """
+    server = _build_structured_only_server(flavor.id)
+    if server is None:
+        pytest.skip(
+            f"{flavor.id}: no known way to make this flavor answer with an "
+            "empty content list and a structured value"
+        )
+    track(server, "proj_test", AgentCatOptions())
+
+    async with flavor.client(server) as client:
+        await flavor.call(client, "structured_only", {})
+
+    event = capture[0]
+    # Confirms the fixture itself, not just the estimate: the event records
+    # the customer's undecorated result, an empty content list with the
+    # structured value intact — the wire response the client actually sees
+    # also carries the SDK's session mint-back text, which must not count.
+    assert event.response["content"] == []
+    structured = event.response.get("structured_content") or event.response.get(
+        "structuredContent"
+    )
+    assert structured == {"result": "ok"}
+    assert event.output_tokens == 5  # {"result":"ok"} = 15 bytes
+
+
 @pytest.mark.parametrize("flavor", flavors(), ids=lambda f: f.id)
 async def test_counts_survive_redaction_and_truncation(flavor, capture, monkeypatch):
     sent: list = []

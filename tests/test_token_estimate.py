@@ -99,6 +99,17 @@ def test_never_raises_on_the_output_side():
         ({"content": [text("x" * 4096)]}, 1171),
         ({"content": [text("hi")], "isError": True}, 1),
         ({"content": [{"type": "text", "text": 42}, None, "str"]}, 0),
+        ({"content": [], "structuredContent": {"result": "ok"}}, 5),
+        ({"content": []}, 0),
+        ({"content": [], "structuredContent": None}, 0),
+        (
+            {
+                "content": [{"type": "image", "data": "QUJD", "mimeType": "image/png"}],
+                "structuredContent": {"result": "ok"},
+            },
+            0,
+        ),
+        ({"content": [], "structured_content": {"result": "ok"}}, 5),
     ],
 )
 def test_estimate_output_tokens(response, tokens):

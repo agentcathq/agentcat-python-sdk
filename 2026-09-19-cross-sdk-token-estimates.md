@@ -35,6 +35,13 @@ response → field omitted. Content with no text-bearing block → 0. The Go
 adapters record no `Response` on `isError` results, so Go omits
 `output_tokens` there while TypeScript and Python count the error text.
 
+Structured-only results: when `content` is present and EMPTY and the result
+carries `structuredContent` (Python: also the `structured_content` spelling),
+`output_tokens` is the compact JSON of that structured value instead of 0. Any
+non-empty `content`, even image-only, keeps the text-only count; a null or
+absent structured value on empty content still counts 0. Vector:
+`{"content":[],"structuredContent":{"result":"ok"}}` → 15 bytes → 5.
+
 ## Serialization corner cases
 
 Non-canonical numbers (`1.0`; integers at or above 1e21, which
@@ -69,6 +76,9 @@ truncate. Nothing recomputes them afterwards.
 | resource with blob only | 0 | 0 |
 | text `"hi"` + 1000-byte `structuredContent` | 2 | 1 |
 | `{"result":"ok"}` (no content) | 15 | 5 |
+| empty content + `structuredContent` `{"result":"ok"}` | 15 | 5 (structured-only) |
+| empty content, no `structuredContent` | 0 | 0 |
+| image-only content + `structuredContent` `{"result":"ok"}` | 0 | 0 |
 | text of 4096 `x` | 4096 | 1171 |
 
 | Bytes | Tokens |

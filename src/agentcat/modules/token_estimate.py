@@ -85,6 +85,14 @@ def estimate_output_tokens(response: Any) -> int | None:
         if not isinstance(content, list):
             byte_count = _compact_json_bytes(response)
             return None if byte_count is None else estimate_tokens(byte_count)
+        if len(content) == 0:
+            structured = response.get("structuredContent")
+            if structured is None:
+                structured = response.get("structured_content")
+            if structured is not None:
+                byte_count = _compact_json_bytes(structured)
+                return None if byte_count is None else estimate_tokens(byte_count)
+            return 0
         return estimate_tokens(
             sum(_content_block_bytes(block) for block in content)
         )

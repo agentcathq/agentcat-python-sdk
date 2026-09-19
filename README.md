@@ -164,7 +164,8 @@ agentcat.track(server, "proj_0000000", AgentCatOptions(redact_event=redact_event
 
 Tool-call events also carry `input_tokens` and `output_tokens`: estimates
 (`ceil(utf8_bytes / 3.5)`) of the raw tool arguments and of the text in the
-result's content blocks. They are computed before your redaction hooks run,
+result's content blocks (or of the structured content, when a result has no
+content blocks). They are computed before your redaction hooks run,
 so they describe the original payload size even when the stored strings are
 redacted. Drop the two fields in `redact_event` if that size must not leave
 your server.
