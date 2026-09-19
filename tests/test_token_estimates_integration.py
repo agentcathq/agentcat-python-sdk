@@ -48,7 +48,13 @@ async def test_counts_survive_redaction_and_truncation(flavor, capture, monkeypa
     track(
         built.server,
         "proj_test",
-        AgentCatOptions(redact_sensitive_information=lambda _text: "[REDACTED]"),
+        # Only the secret string is rewritten: a hook that replaced every
+        # string would also clobber the content block's `type` discriminator.
+        AgentCatOptions(
+            redact_sensitive_information=lambda text: (
+                "[REDACTED]" if "secret" in text else text
+            )
+        ),
     )
 
     async with flavor.client(built.server) as client:
