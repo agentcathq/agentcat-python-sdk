@@ -49,7 +49,7 @@ def _build_structured_only_server(flavor_id: str):
     allows: ``MCPServer`` and the community ``fastmcp`` both pass a
     already-built result object straight through their `convert_result`
     (`mcp.server.mcpserver.utilities.func_metadata.FuncMetadata.convert_result`,
-    `fastmcp.tools.base.Tool.convert_result`) instead of re-deriving content
+    the community `Tool.convert_result`) instead of re-deriving content
     from it, and the lowlevel `Server`'s `on_call_tool` callback is returned
     to the wire completely unmodified.
     """
@@ -89,7 +89,11 @@ def _build_structured_only_server(flavor_id: str):
 
     if flavor_id.startswith("community-"):
         from fastmcp import FastMCP
-        from fastmcp.tools.base import ToolResult
+
+        # `fastmcp.tools` re-exports ToolResult in every supported release;
+        # the module behind it moved (`fastmcp.tools.tool` through 3.1.x,
+        # `fastmcp.tools.base` from 3.2), so import from the package.
+        from fastmcp.tools import ToolResult
 
         server = FastMCP("structured-only")
 
