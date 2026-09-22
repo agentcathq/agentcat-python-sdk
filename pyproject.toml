@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.2.0,<3",
-    "agentcat-api==1.0.0",
+    "agentcat-api==1.0.2",
     "pydantic>=2.0.0,<3",
     "requests>=2.31.0",
 ]
