@@ -31,6 +31,12 @@ class TestValidateTags:
         assert validate_tags(tags) == {"valid_key": "value", "good.key": "value"}
         assert any("invalid!key" in call.args[0] for call in mock_log.call_args_list)
 
+    def test_drops_keys_with_trailing_newline(self, mock_log):
+        # re's `$` also matches just before a final "\n", so the key regex
+        # alone lets "env\n" through. TypeScript and Go both reject it.
+        tags = {"env\n": "production", "region": "us-east-1"}
+        assert validate_tags(tags) == {"region": "us-east-1"}
+
     def test_drops_keys_longer_than_max(self, mock_log):
         long_key = "a" * (MAX_TAG_KEY_LENGTH + 1)
         tags = {long_key: "value", "short": "value"}

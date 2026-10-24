@@ -23,7 +23,7 @@ def validate_tags(tags: dict) -> Optional[dict]:
     valid: list[tuple[str, str]] = []
 
     for key, value in tags.items():
-        if not isinstance(key, str) or not key or not TAG_KEY_REGEX.match(key):
+        if not isinstance(key, str) or not key or not TAG_KEY_REGEX.fullmatch(key):
             write_to_log(
                 f'Dropping invalid tag: "{key}" — key contains invalid characters or is empty'
             )
