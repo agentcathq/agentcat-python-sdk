@@ -271,6 +271,14 @@ jobs:
         # `>=1.2.0,<3` floor resolved to a moment ago.
         uv pip install "mcp==${{ matrix.mcp-version }}"
 
+        # MCP 1.x bundles its own FastMCP implementation. Its older releases
+        # import `eval_type_backport`, removed in Pydantic 2.12, so keep these
+        # compatibility legs on the latest compatible Pydantic line. MCP 2.x
+        # is tested against the current Pydantic release.
+        if [[ "${{ matrix.mcp-version }}" == 1.* ]]; then
+          uv pip install "pydantic<2.12"
+        fi
+
         # Belt and braces: nothing above should pull fastmcp in.
         uv pip uninstall fastmcp -y 2>/dev/null || true
 
