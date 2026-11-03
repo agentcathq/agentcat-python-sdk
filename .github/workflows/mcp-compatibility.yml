@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Run daily at midnight UTC to catch new MCP versions
-    - cron: '0 0 * * *'
+    # Run daily at 2 AM UTC to catch new MCP versions
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 # The two generations agentcat 2.x supports, as PEP 440 ranges. `mcp` spans
@@ -36,8 +36,49 @@ env:
   FASTMCP_RANGE: ">=3.0,<5"
 
 jobs:
+  # Decides whether a pull request touches SDK code. The compat jobs below are
+  # gated on its output instead of filtering the whole workflow with
+  # `on.pull_request.paths`, because `report-compatibility` is a required
+  # status check: a workflow that never starts leaves it pending and blocks
+  # the merge, while skipped jobs let it run and pass. On push, schedule and
+  # workflow_dispatch the output is always 'true'.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sdk: ${{ steps.diff.outputs.sdk }}
+
+    steps:
+    - uses: actions/checkout@v4
+      if: github.event_name == 'pull_request'
+      with:
+        fetch-depth: 0
+
+    - name: Detect SDK-code changes
+      id: diff
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ "$EVENT_NAME" != "pull_request" ]; then
+          echo "sdk=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # SDK code: library source, package manifest and lockfile, the tests
+        # the compat jobs run, the scripts they call, and this workflow.
+        changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+        echo "Changed files:"
+        echo "$changed"
+        if echo "$changed" | grep -qE '^(src/|tests/|pyproject\.toml$|uv\.lock$|\.github/scripts/|\.github/workflows/mcp-compatibility\.yml$)'; then
+          echo "sdk=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "sdk=false" >> "$GITHUB_OUTPUT"
+        fi
+
   discover-mcp-versions:
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.sdk == 'true'
     outputs:
       mcp-versions: ${{ steps.get-mcp-versions.outputs.versions }}
 
@@ -57,6 +98,8 @@ jobs:
 
   discover-fastmcp-versions:
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.sdk == 'true'
     outputs:
       fastmcp-versions: ${{ steps.get-fastmcp-versions.outputs.versions }}
 
@@ -85,6 +128,8 @@ jobs:
   # per-leg test path to keep in sync here.
   test-dependency-groups:
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.sdk == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -279,6 +324,16 @@ jobs:
           uv pip install "pydantic<2.12"
         fi
 
+        # anyio 4.16 wakes a receive() blocked on a closed memory stream with
+        # ClosedResourceError. MCP below 1.10 does not catch that in
+        # BaseSession._receive_loop, so the first client disconnect kills the
+        # Streamable-HTTP session manager's task group and every later request
+        # gets a 500 ("Task group is not initialized"). Upstream bug, AgentCat
+        # or not; mcp 1.10.0 added the guard. Keep those legs on anyio 4.15.
+        if [[ "${{ matrix.mcp-version }}" == 1.[0-9].* ]]; then
+          uv pip install "anyio<4.16"
+        fi
+
         # Belt and braces: nothing above should pull fastmcp in.
         uv pip uninstall fastmcp -y 2>/dev/null || true
 
@@ -286,6 +341,7 @@ jobs:
       run: |
         echo "Installed MCP version:"
         uv pip show mcp | grep "Version:" || echo "MCP not found"
+        uv pip show anyio | grep "Version:" || echo "anyio not found"
 
     - name: Verify FastMCP is not installed
       run: |
