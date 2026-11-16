@@ -560,10 +560,9 @@ async def list_tools(client: Any) -> list[dict[str, Any]]:
 
 async def settle() -> None:
     """Wait until every started heartbeat has been built and delivered."""
-    while server_info._tasks:
-        await asyncio.gather(*list(server_info._tasks), return_exceptions=True)
-        # A finished task leaves the set in a callback, on the next loop turn.
-        await asyncio.sleep(0)
+    # Polled, not awaited: a server under test can run on a loop of its own.
+    while server_info._starts or server_info._tasks:
+        await asyncio.sleep(0.005)
     delivered = threading.Event()
     assert queue_module.event_queue.add_job(delivered.set)
     assert await asyncio.to_thread(delivered.wait, 10)
@@ -587,7 +586,12 @@ def project() -> str:
 
 @pytest.fixture(autouse=True)
 def events(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """A live event queue whose events go to a list, and nowhere else."""
+    """A live event queue whose events go to a list, and nowhere else.
+
+    The build also starts sooner here than in production, so that a test does
+    not wait half a second for each heartbeat.
+    """
+    monkeypatch.setattr(server_info, "START_DELAY_SECONDS", 0.01)
     captured: list[Any] = []
     api = MagicMock()
     api.publish_event.side_effect = lambda publish_event_request, **_: captured.append(
@@ -1189,9 +1193,11 @@ async def test_v10_a_list_handler_that_never_returns_delays_no_tool_call(
 
     async with flavor.client(demo.server) as client:
         assert "alpha:hi" in await call(client)
-        # The call has its result while the build still waits for the list.
-        building = list(server_info._tasks)
-        assert building and not building[0].done()
+        while not server_info._tasks:
+            await asyncio.sleep(0.005)
+        # The build waits for the list, and the server answers as before.
+        demo.hooks.clear()
+        assert "alpha:hi" in await call(client)
         await settle()
 
     assert demo.gates[key].calls >= 1
@@ -1200,6 +1206,73 @@ async def test_v10_a_list_handler_that_never_returns_delays_no_tool_call(
         assert key not in server_info_posts.bodies[0]["features"]
     assert stray_errors == []
     assert capfd.readouterr() == ("", "")
+
+
+@FLAVORS
+async def test_v10_no_list_handler_runs_before_the_client_has_its_result(
+    flavor: Flavor, project: str, server_info_posts: Any, monkeypatch: Any
+) -> None:
+    monkeypatch.setattr(server_info, "START_DELAY_SECONDS", 0.5)
+    order: list[str] = []
+    demo = build_demo(flavor)
+    demo.hooks["alpha"] = lambda: order.append("tool body")
+    for key, gate in demo.gates.items():
+
+        async def enter(key: str = key, enter: Any = gate.enter) -> None:
+            order.append(f"{key} handler")
+            await enter()
+
+        gate.enter = enter  # type: ignore[method-assign]
+    track(demo.server, project)
+    settled_memory()
+
+    async with flavor.client(demo.server) as client:
+        assert "alpha:hi" in await call(client)
+        order.append("client has the result")
+        await settle()
+
+    assert len(server_info_posts.bodies) == 1
+    # mcp 1.x reads the tool list on its own before the tool body runs. From
+    # the tool body on, the next thing that happens is the client's.
+    after_the_tool = order[order.index("tool body") + 1 :]
+    assert after_the_tool[0] == "client has the result"
+    assert sorted(after_the_tool[1:]) == sorted(f"{key} handler" for key in demo.gates)
+
+
+async def test_v10_the_build_gives_the_loop_a_turn_before_each_page() -> None:
+    turns: list[str] = []
+
+    async def other_work() -> None:
+        for _ in range(3):
+            turns.append("other")
+            await asyncio.sleep(0)
+
+    async def fetch(cursor: Any) -> Any:
+        turns.append("page")
+        return [{"name": "tool"}], (
+            None if cursor == "2" else str(int(cursor or 0) + 1)
+        )
+
+    task = asyncio.ensure_future(other_work())
+    await server_info._collect(fetch)
+    await task
+
+    assert turns == ["other", "page", "other", "page", "other", "page"]
+
+
+def test_v10_a_start_that_never_fires_holds_nothing() -> None:
+    def source() -> Any:
+        raise AssertionError("the build never starts")
+
+    async def one_check() -> None:
+        server_info.check(_data(), server_info.LIST_REQUEST, source)
+        assert len(server_info._starts) == 1
+
+    asyncio.run(one_check())
+    gc.collect()
+
+    assert len(server_info._starts) == 0
+    assert server_info._tasks == set()
 
 
 @FLAVORS
@@ -1528,8 +1601,15 @@ def test_v14_the_post_uses_the_api_client_of_the_event_send(
 ) -> None:
     api = fake_api(monkeypatch)
     queue = queue_module.event_queue
+    heartbeat = queue.server_info_client().api_client
+    events = queue.api_client.api_client
 
-    assert queue.server_info_api.api_client is queue.api_client.api_client
+    assert heartbeat.configuration.host == events.configuration.host == SINK_URL
+    assert heartbeat.default_headers == events.default_headers
+    assert heartbeat.user_agent == events.user_agent
+    # The events keep the retries of the client. The heartbeat has none.
+    assert events.configuration.retries is None
+    assert heartbeat.configuration.retries is False
     assert server_info._post(_small_body()) == 202
 
     assert api.requests[0]["url"] == f"{SINK_URL}/v1/public/server-info/"
@@ -1545,11 +1625,17 @@ def test_v13_the_sender_reports_the_status_of_the_answer(
     assert server_info._post(_small_body()) == status
 
 
-def test_v10_a_queue_with_no_server_info_client_sends_nothing() -> None:
-    assert queue_module.event_queue.server_info_api is None
+def test_v10_a_queue_with_no_server_info_client_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = FakeApi(monkeypatch)
+    monkeypatch.setattr(queue_module, "event_queue", EventQueue(api_client=MagicMock()))
+    assert queue_module.event_queue.server_info_client() is None
 
     with pytest.raises(RuntimeError):
         server_info._post(_small_body())
+
+    assert api.requests == []
 
 
 def test_v13_a_413_leads_to_one_smaller_post(server_info_posts: Any) -> None:
@@ -1639,3 +1725,114 @@ async def test_the_log_counts_the_heartbeat_and_holds_none_of_its_text(
         "so it is left out",
         f"Server info heartbeat sent | 4 tools | {size} bytes",
     ]
+
+
+# ── a real transport ─────────────────────────────────────────────────────────
+
+_POST_TO_A_CLOSED_PORT = """
+import json, sys, time
+
+sink = sys.argv[1]
+import agentcat.modules.constants as constants
+
+# Before the event queue is imported, so no client is built for another host.
+constants.AGENTCAT_API_URL = sink
+
+import urllib3.util.connection as connection
+
+attempts = []
+connect = connection.create_connection
+
+
+def counted(address, *args, **kwargs):
+    assert address[0] == "127.0.0.1", address
+    attempts.append(address)
+    return connect(address, *args, **kwargs)
+
+
+connection.create_connection = counted
+
+from agentcat.modules import server_info
+
+body = {
+    "project_id": "proj_closed_port",
+    "server_name": "closed-port",
+    "server_version": "1",
+    "server_title": "",
+    "instructions": "",
+    "features": {"tools": []},
+}
+started = time.monotonic()
+server_info._deliver(body, None, started + 30)
+print(json.dumps({"attempts": len(attempts), "seconds": time.monotonic() - started}))
+"""
+
+
+def test_v10_a_post_to_a_closed_port_is_one_silent_attempt() -> None:
+    import socket
+    import subprocess
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    # A process of its own, with no logging set up: what Python's last-resort
+    # handler prints there is what a customer's stdio server would print.
+    done = subprocess.run(
+        [sys.executable, "-c", _POST_TO_A_CLOSED_PORT, f"http://127.0.0.1:{port}"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert done.returncode == 0, done.stderr
+    assert done.stderr == ""
+    result = json.loads(done.stdout)
+    assert result["attempts"] == 1
+    assert result["seconds"] < server_info.SEND_TIMEOUT_SECONDS
+
+
+@pytest.mark.skipif(MCP_MAJOR < 2, reason="the 2026 Streamable HTTP path is mcp 2.x")
+async def test_v17_over_http_a_bare_lowlevel_server_sends_for_a_list_request_only(
+    project: str, server_info_posts: Any
+) -> None:
+    """On this path mcp reads the tool list itself inside each tool call."""
+    import uvicorn
+    from mcp import types
+    from mcp.client import Client
+
+    from tests.e2e._helpers import find_free_port, wait_for_port
+
+    demo = _build_lowlevel_v2(Spec(), {})
+    demo.gates = _gate_v2(demo.lowlevel)
+    track(demo.server, project)
+    port = find_free_port()
+    app = demo.server.streamable_http_app(stateless_http=True)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        await asyncio.to_thread(wait_for_port, port)
+        async with Client(f"http://127.0.0.1:{port}/mcp") as client:
+            result = await client.session.send_request(
+                types.CallToolRequest(
+                    params=types.CallToolRequestParams(
+                        name="alpha", arguments={"text": "hi"}
+                    )
+                ),
+                types.CallToolResult,
+            )
+            assert "alpha:hi" in "".join(block.text for block in result.content)
+            # The SDK's own listing ran, and it is not a client's.
+            assert demo.gates["tools"].calls >= 1
+            await settle()
+            assert server_info_posts.bodies == []
+
+            assert len(await list_tools(client)) == 4
+            await settle()
+            assert len(server_info_posts.bodies) == 1
+    finally:
+        server.should_exit = True
+        await asyncio.to_thread(thread.join, 5)

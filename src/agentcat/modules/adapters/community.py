@@ -144,14 +144,19 @@ def _request_context(context: Any) -> Any:
 
 
 def _serves_a_tool_call(request_context: Any) -> bool:
-    """Whether the MCP request behind this context is a ``tools/call``.
+    """Whether the MCP request behind a ``tools/list`` pass is another method.
 
     The mcp 1.x lowlevel server fills its tool cache through the ``tools/list``
     handler in the middle of a ``tools/call``, and under FastMCP 3 that listing
     runs the middleware chain like a client's. The session knows which request
-    it is answering. A session that does not say (mcp 2.x keeps no such table)
-    is taken to be answering what the middleware was handed.
+    it is answering. mcp 2.x keeps no such table; there the HTTP request says
+    it, on the one path where mcp lists inside a call. A context that says
+    neither is taken to be answering what the middleware was handed.
     """
+    from agentcat.modules.adapters.lowlevel_v2 import lists_for_another_request
+
+    if lists_for_another_request(request_context):
+        return True
     try:
         in_flight = request_context.session._in_flight
         request = in_flight[request_context.request_id].request

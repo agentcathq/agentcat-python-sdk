@@ -20,7 +20,14 @@ from typing import Any, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
-from agentcat_api import ApiClient, Configuration, EventsApi, ServerInfoApi
+from agentcat_api import (
+    ApiClient,
+    ApiException,
+    Configuration,
+    EventsApi,
+    PublishServerInfoRequest,
+    ServerInfoApi,
+)
 from agentcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
 
 from ..types import Event, UnredactedEvent
@@ -81,9 +88,10 @@ class EventQueue:
         self.concurrency = 1
 
         # Allow injection of api_client for testing. The server info heartbeat
-        # sends through the same ApiClient as the events, so an injected events
-        # client brings no server info client.
-        self.server_info_api: ServerInfoApi | None = None
+        # has a client of its own for the configured base URL, built on its
+        # first send, so an injected events client brings none.
+        self._api_base_url: str | None = None
+        self._server_info_api: ServerInfoApi | None = None
         if api_client is None:
             self.configure(AGENTCAT_API_URL)
         else:
@@ -129,7 +137,8 @@ class EventQueue:
         config = Configuration(host=api_base_url)
         api_client_instance = ApiClient(configuration=config)
         self.api_client = EventsApi(api_client=api_client_instance)
-        self.server_info_api = ServerInfoApi(api_client=api_client_instance)
+        self._api_base_url = api_base_url
+        self._server_info_api = None
 
     def add(self, event: UnredactedEvent) -> None:
         """Add event to queue."""
@@ -160,6 +169,39 @@ class EventQueue:
         except queue.Full:
             return False
         return True
+
+    def server_info_client(self) -> ServerInfoApi | None:
+        """The client of the server info heartbeat, or None without a base URL.
+
+        The same host, headers and HTTP stack as the events client, with one
+        difference: no retry. urllib3 tries a failed connect four times by
+        default, and a heartbeat is one attempt.
+        """
+        if self._server_info_api is None and self._api_base_url is not None:
+            once = Configuration(host=self._api_base_url)
+            once.retries = False
+            self._server_info_api = ServerInfoApi(
+                api_client=ApiClient(configuration=once)
+            )
+        return self._server_info_api
+
+    def post_server_info(self, body: dict[str, Any], timeout: float) -> int:
+        """Send one server info body. Returns the HTTP status of the answer.
+
+        One attempt, bounded by `timeout` seconds in total. Raises when no
+        answer comes, or when this queue has no server info client.
+        """
+        api = self.server_info_client()
+        if api is None:
+            raise RuntimeError("the event queue has no server info client")
+        try:
+            response = api.publish_server_info_with_http_info(
+                publish_server_info_request=PublishServerInfoRequest(**body),
+                _request_timeout=timeout,
+            )
+        except ApiException as error:
+            return int(error.status or 0)
+        return int(response.status_code)
 
     def _worker(self) -> None:
         """Consumer thread: pulls events straight off the bounded queue.

@@ -8,9 +8,10 @@ The work has three parts, and each one runs in a different place:
 
 * `check` runs on the request path. It reads and writes times in memory and
   does nothing else: no I/O, no log line, no customer code.
-* The build runs as a task on the server's event loop, started after the
-  request's handler has returned. The list handlers are async and belong to
-  that loop, so nothing else can call them.
+* The build runs as a task on the server's event loop. A timer of that loop
+  starts it `START_DELAY_SECONDS` after the check, so no list handler runs
+  while the result of the request is still being written. The list handlers
+  are async and belong to that loop, so nothing else can call them.
 * Redaction and the POST run on the event queue's worker thread, because both
   can block.
 
@@ -25,6 +26,7 @@ import contextvars
 import json
 import threading
 import time
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -45,6 +47,11 @@ ATTEMPT_INTERVAL_SECONDS = 3600.0
 # an ordinary tool call does not start a heartbeat in it.
 SETTLED_MEMORY_SECONDS = 60.0
 MAX_GUARD_KEYS = 1000
+
+# How long after the check the build starts. The handler of the request has
+# returned by then, but its result is still on its way out: the MCP library
+# and an HTTP transport need several turns of the loop to write it.
+START_DELAY_SECONDS = 0.5
 
 MAX_PAGES = 100
 LIST_TIMEOUT_SECONDS = 5.0
@@ -97,6 +104,10 @@ _now: Callable[[], float] = time.monotonic
 # that nothing else holds could be collected before it ends.
 _tasks: set[asyncio.Task[None]] = set()
 
+# Builds that wait for their start. The loop holds each timer; this set only
+# lets a reader see them, and a timer that its loop dropped leaves it.
+_starts: weakref.WeakSet[asyncio.TimerHandle] = weakref.WeakSet()
+
 # Set inside a build. A list handler can pass through the SDK's own tools/list
 # hook again, and that pass must not start a second build.
 _building: contextvars.ContextVar[bool] = contextvars.ContextVar(
@@ -116,16 +127,40 @@ def identity_text(server: Any, attribute: str) -> str:
 def check(
     data: AgentCatData, kind: str, source: Callable[[], ServerInfoSource]
 ) -> None:
-    """Start a heartbeat when one is due. Safe to call on the request path.
+    """Schedule a heartbeat when one is due. Safe to call on the request path.
 
-    `source` is not called here. The build calls it later, on the event loop.
-    Without a running asyncio loop there is nowhere to run the build, so no
-    heartbeat is sent.
+    Nothing of the heartbeat runs here: a timer of the running loop starts the
+    build later, and the build is what calls `source`. The timer carries a copy
+    of the current context, so the list handlers see the request that started
+    the check. A loop that closes first drops the timer, and no heartbeat is
+    sent. Without a running asyncio loop there is nowhere to run the build, so
+    none is sent either.
     """
     try:
         if _building.get() or not _due(data, kind):
             return
         loop = asyncio.get_running_loop()
+        _starts.add(
+            loop.call_later(
+                START_DELAY_SECONDS,
+                _start,
+                loop,
+                data,
+                source,
+                context=contextvars.copy_context(),
+            )
+        )
+    except Exception:
+        return
+
+
+def _start(
+    loop: asyncio.AbstractEventLoop,
+    data: AgentCatData,
+    source: Callable[[], ServerInfoSource],
+) -> None:
+    """The timer callback: put the build on the loop. Never raises."""
+    try:
         build = _run(data, source)
         try:
             task = loop.create_task(build, name="agentcat-server-info")
@@ -233,6 +268,9 @@ async def _collect(fetch: PageFetcher) -> list[Any]:
     seen: set[str] = set()
     cursor: Any = None
     for _ in range(MAX_PAGES):
+        # One turn of the loop for everything else before each page, so a
+        # handler that never suspends cannot run the lists back to back.
+        await asyncio.sleep(0)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise asyncio.TimeoutError
@@ -331,22 +369,10 @@ def _within(redact: Callable[[str], Any], deadline: float) -> Callable[[str], An
 
 
 def _post(body: dict[str, Any]) -> int:
-    """One POST through the API client of the event send. Returns the status."""
-    from agentcat_api import ApiException, PublishServerInfoRequest
-
+    """One POST through the event queue's API client. Returns the status."""
     from agentcat.modules import event_queue as queue_module
 
-    api = queue_module.event_queue.server_info_api
-    if api is None:
-        raise RuntimeError("the event queue has no server info client")
-    try:
-        response = api.publish_server_info_with_http_info(
-            publish_server_info_request=PublishServerInfoRequest(**body),
-            _request_timeout=SEND_TIMEOUT_SECONDS,
-        )
-    except ApiException as error:
-        return int(error.status or 0)
-    return int(response.status_code)
+    return queue_module.event_queue.post_server_info(body, SEND_TIMEOUT_SECONDS)
 
 
 # What `_deliver` calls to send. The test setup replaces it with a recorder.

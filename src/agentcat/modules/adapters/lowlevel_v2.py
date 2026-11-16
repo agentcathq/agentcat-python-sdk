@@ -96,6 +96,23 @@ _INFO_LISTS = (
 )
 
 
+def lists_for_another_request(ctx: Any) -> bool:
+    """Whether a ``tools/list`` pass serves an HTTP request for another method.
+
+    On the 2026 Streamable HTTP path mcp reads the tool list through the
+    registered handler inside a ``tools/call``, to check the ``Mcp-Param-*``
+    headers of the call. That pass gets the HTTP request of the call, and the
+    transport has already made sure that its ``Mcp-Method`` header names the
+    method of its body. A request with no such header (stdio, the older HTTP
+    path) is a client's listing.
+    """
+    try:
+        method = ctx.request.headers.get("mcp-method")
+    except Exception:
+        return False
+    return isinstance(method, str) and method != LIST_METHOD
+
+
 def _list_params(params_type: Any, cursor: Any) -> Any:
     """The params a client sends for one page of a list.
 
@@ -468,6 +485,8 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         """
         try:
             if is_list:
+                if lists_for_another_request(ctx):
+                    return
                 kind = LIST_REQUEST
             elif (
                 getattr(params, "name", None) == GET_MORE_TOOLS_NAME
