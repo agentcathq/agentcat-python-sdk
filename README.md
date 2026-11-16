@@ -68,6 +68,19 @@ AgentCat works as a lightweight middleware inside your MCP server. When you call
 
 Injected parameters are stripped from arguments before your tool handler runs, so your code never sees them. For tools that declare an output schema, issued IDs are also mirrored into `structuredContent` (as `_mcp_instructions`), so clients that only read structured results still receive them.
 
+## Server info
+
+AgentCat also needs to know what an agent sees on your server. The SDK sends this to AgentCat as one request:
+
+- the name, the version, the title and the instructions of your server;
+- its full lists of tools, resources, resource templates and prompts, as a client gets them. The tool list has the parameters and the `get_more_tools` tool that AgentCat adds.
+
+The SDK reads the lists from your server's own list handlers. It does this about once an hour for each process and server name, after it has answered a `tools/list` or a `tools/call` request. A process that started less than 60 seconds ago sends only after a `tools/list` request or a `get_more_tools` call, so a runtime that keeps no memory between requests sends more often.
+
+Your `redact_sensitive_information` function runs on the text before it leaves: the title, the instructions, and every description and schema. The names of your server, tools, resources and prompts are not redacted. If the function fails, the SDK sends nothing.
+
+The SDK writes no file for this. It sends nothing when tracing is off or when `track()` has no project ID, and your telemetry exporters do not receive it. A failure never reaches your server or a tool call.
+
 ## Getting Started
 
 To get started with AgentCat, first create an account and obtain your project ID by signing up at [agentcat.com](https://agentcat.com). For detailed setup instructions visit our [documentation](https://docs.agentcat.com).
