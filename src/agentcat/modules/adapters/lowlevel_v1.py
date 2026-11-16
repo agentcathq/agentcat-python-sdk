@@ -41,6 +41,16 @@ from agentcat.modules.adapters._inner_tap import (
 )
 from agentcat.modules.logging import write_to_log
 from agentcat.modules.request_extra import extra_from_request_context
+from agentcat.modules.server_info import (
+    FEEDBACK_NOTE,
+    LIST_REQUEST,
+    TOOL_CALL,
+    Page,
+    PageFetcher,
+    ServerInfoSource,
+    identity_text,
+)
+from agentcat.modules.server_info import check as check_server_info
 from agentcat.types import AgentCatData
 
 # The two handlers this adapter wraps, keyed by the name of the ``Server``
@@ -50,6 +60,72 @@ from agentcat.types import AgentCatData
 # the decorator is the only seam there is.
 _LIST = "list_tools"
 _CALL = "call_tool"
+
+
+# The lists of the server info heartbeat: the key of each one in the body, the
+# name of its request model and its field on the result.
+_INFO_LISTS = (
+    ("tools", "ListToolsRequest", "tools/list", "tools"),
+    ("resources", "ListResourcesRequest", "resources/list", "resources"),
+    (
+        "resourceTemplates",
+        "ListResourceTemplatesRequest",
+        "resources/templates/list",
+        "resourceTemplates",
+    ),
+    ("prompts", "ListPromptsRequest", "prompts/list", "prompts"),
+)
+
+
+def _list_request(request_type: Any, method: str, cursor: Any) -> Any:
+    """The request a client sends for one page of a list.
+
+    The cursor rides in ``params`` where this mcp 1.x has the model for it.
+    The oldest releases keep it as a field of the request itself.
+    """
+    if cursor is None:
+        return request_type(method=method)
+    try:
+        from mcp.types import PaginatedRequestParams
+    except ImportError:
+        return request_type(method=method, cursor=cursor)
+    return request_type(method=method, params=PaginatedRequestParams(cursor=cursor))
+
+
+def page_fetcher(
+    handler: Any, request_type: Any, method: str, field: str, finish: Any = None
+) -> PageFetcher:
+    """Reads one list page by page through its registered handler.
+
+    ``finish`` turns the handler's result into the one a client receives.
+    """
+
+    async def fetch(cursor: Any) -> Page:
+        result = await handler(_list_request(request_type, method, cursor))
+        if finish is not None:
+            result = finish(result)
+        listed = getattr(result, "root", result)
+        return list(getattr(listed, field)), getattr(listed, "nextCursor", None)
+
+    return fetch
+
+
+def list_fetchers(server: Any) -> dict[str, PageFetcher]:
+    """A fetcher for each list this server has a handler for.
+
+    A handler runs as it does for a client: it is called on the server's event
+    loop, in a context where ``server.request_context`` still answers with the
+    request that started the heartbeat.
+    """
+    import mcp.types as types
+
+    fetchers: dict[str, PageFetcher] = {}
+    for key, type_name, method, field in _INFO_LISTS:
+        request_type = getattr(types, type_name, None)
+        handler = server.request_handlers.get(request_type)
+        if request_type is not None and handler is not None:
+            fetchers[key] = page_fetcher(handler, request_type, method, field)
+    return fetchers
 
 
 def _safe_request_context(server: Any) -> Any:
@@ -236,7 +312,7 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         )
 
     def advertised_tools(
-        original: Any, options: Any
+        original: Any, options: Any, record: bool = True
     ) -> tuple[list[Any], set[int]]:
         """Deep copies of the listed tools, plus get_more_tools when enabled.
 
@@ -245,6 +321,9 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         copy fails is carried through VERBATIM (the customer's object, never
         given to the pipeline) with its id() in the returned skip set — one
         uncopyable tool must not take down the whole listing.
+
+        ``record=False`` leaves the ownership flag alone: the server info
+        heartbeat reads a listing without changing how a call is served.
         """
         nonlocal agentcat_advertises_get_more_tools
         tools: list[Any] = []
@@ -265,12 +344,12 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         customer_owns_get_more_tools = any(
             getattr(tool, "name", None) == GET_MORE_TOOLS_NAME for tool in tools
         )
-        agentcat_advertises_get_more_tools = (
-            options.enable_report_missing and not customer_owns_get_more_tools
-        )
+        advertises = options.enable_report_missing and not customer_owns_get_more_tools
+        if record:
+            agentcat_advertises_get_more_tools = advertises
         # Appended before injection so it receives handle parameters too; the
         # context pass skips it by name, so early placement cannot double-inject.
-        if agentcat_advertises_get_more_tools:
+        if advertises:
             tools.append(make_get_more_tools())
         return tools, skipped
 
@@ -294,23 +373,29 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
         tools, skipped = advertised_tools(listed, current_data().options)
         return [spec for spec in specs_for(tools, skipped) if spec is not None]
 
-    async def wrapped_list(request: Any) -> Any:
-        listed = await original(_LIST)(request)
+    def injected_listing(listed: Any, record: bool = True) -> Any:
+        """The listing a client receives for the customer's ``listed``.
+
+        ``record=False`` builds it without writing the registries a later call
+        strips by, which is what the server info heartbeat needs: it reads
+        every page, and a page must not replace what a client's listing wrote.
+        """
         tracking = current_data()
         try:
-            tools, skipped = advertised_tools(listed, tracking.options)
+            tools, skipped = advertised_tools(listed, tracking.options, record)
             specs = specs_for(tools, skipped)
             injected = build_injected_schemas(
                 [spec for spec in specs if spec is not None],
                 tracking.options,
                 tracking.reported_conflicts,
             )
-            tracking.injected_params_registry = injected.injected_params
-            tracking.output_injection_registry = injected.output_injected
-            # Union, never replace: membership only grows, and a concurrent
-            # listing on another instance may already have recorded a tool this
-            # one did not see.
-            tracking.declared_session_params |= injected.declared_session_params
+            if record:
+                tracking.injected_params_registry = injected.injected_params
+                tracking.output_injection_registry = injected.output_injected
+                # Union, never replace: membership only grows, and a concurrent
+                # listing on another instance may already have recorded a tool
+                # this one did not see.
+                tracking.declared_session_params |= injected.declared_session_params
             for tool, spec in zip(tools, specs, strict=True):
                 if spec is None:
                     continue  # uncopyable tool: served verbatim, never mutated
@@ -328,12 +413,69 @@ def install_lowlevel_v1(server: Any, data: AgentCatData, facade: Any = None) -> 
             )
             return listed
 
+    def server_info_source() -> ServerInfoSource:
+        """What the heartbeat reads from this server, as of right now."""
+        lists = list_fetchers(server)
+        list_handler = original(_LIST)
+        if list_handler is None:
+            lists.pop("tools", None)
+        else:
+            # The table holds this adapter's wrapper. The heartbeat goes to the
+            # customer's handler and injects without recording.
+            lists["tools"] = page_fetcher(
+                list_handler,
+                ListToolsRequest,
+                "tools/list",
+                "tools",
+                finish=lambda listed: injected_listing(listed, record=False),
+            )
+        return ServerInfoSource(
+            title=identity_text(server, "title"),
+            instructions=identity_text(server, "instructions"),
+            lists=lists,
+        )
+
+    def check_after(request: Any, is_list: bool) -> None:
+        """Run the heartbeat check for a request this adapter has served.
+
+        Called from a ``finally``, so nothing may leave it: an error here would
+        replace the result of the request.
+        """
+        try:
+            if is_list:
+                kind = LIST_REQUEST
+            elif (
+                getattr(request.params, "name", None) == GET_MORE_TOOLS_NAME
+                and agentcat_advertises_get_more_tools
+            ):
+                kind = FEEDBACK_NOTE
+            else:
+                kind = TOOL_CALL
+            check_server_info(current_data(), kind, server_info_source)
+        except Exception:
+            return
+
+    async def wrapped_list(request: Any) -> Any:
+        try:
+            return injected_listing(await original(_LIST)(request))
+        finally:
+            # The SDK refreshes its own tool cache through this handler with no
+            # request at all. That is not a client asking for the list.
+            if request is not None:
+                check_after(request, is_list=True)
+
+    async def wrapped_call(request: Any) -> Any:
+        try:
+            return await tracked_call(request)
+        finally:
+            check_after(request, is_list=False)
+
     async def run_original(request: Any, arguments: dict[str, Any]) -> Any:
         """Dispatch to the customer's handler on a clone carrying only their args."""
         params = request.params.model_copy(update={"arguments": arguments})
         return await original(_CALL)(request.model_copy(update={"params": params}))
 
-    async def wrapped_call(request: Any) -> Any:
+    async def tracked_call(request: Any) -> Any:
         tracking = current_data()
         options = tracking.options
         name = getattr(request.params, "name", None) or "Unknown Tool"

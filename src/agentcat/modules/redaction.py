@@ -118,6 +118,69 @@ def _sync_redactor(redact_fn: Callable[[str], Any]) -> Callable[[str], Any]:
     return redact
 
 
+# The fields of a server info list item that name it. A name is how AgentCat
+# joins the item to the events about it, so it stays as the server gave it.
+SERVER_INFO_NAME_FIELDS: set[str] = {"name", "uri", "uriTemplate"}
+
+
+def redact_server_info(
+    body: dict[str, Any], redact_fn: Callable[[str], Any]
+) -> dict[str, Any]:
+    """The server info body with the customer's redaction applied to its text.
+
+    The function runs on every string value of `server_title`, `instructions`
+    and `features`, except the name fields at the top level of a list item.
+    Keys are never changed and no value is dropped, so a schema keeps its
+    shape. The project, the server name and the server version are identifiers
+    and stay as they are.
+
+    Raises when the function fails or returns anything but a string. The
+    caller then sends nothing: text the function did not process never leaves.
+    Like `redact_event`, this drives an async function to completion, so it
+    belongs on a thread with no event loop.
+    """
+    run = _sync_redactor(redact_fn)
+
+    def redact(value: str) -> str:
+        result = run(value)
+        if not isinstance(result, str):
+            raise TypeError(
+                "redact_sensitive_information returned "
+                f"{type(result).__name__}, not a string"
+            )
+        return result
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, str):
+            return redact(value)
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        return value
+
+    def item(value: Any) -> Any:
+        if not isinstance(value, dict):
+            return walk(value)
+        return {
+            key: field if key in SERVER_INFO_NAME_FIELDS else walk(field)
+            for key, field in value.items()
+        }
+
+    features = {
+        key: [item(entry) for entry in entries]
+        if isinstance(entries, list)
+        else walk(entries)
+        for key, entries in body["features"].items()
+    }
+    return {
+        **body,
+        "server_title": walk(body["server_title"]),
+        "instructions": walk(body["instructions"]),
+        "features": features,
+    }
+
+
 def redact_event(event: "UnredactedEvent", redact_fn: Callable[[str], str]) -> "Event":
     """
     Applies the customer's redaction function to all string fields in an Event object.

@@ -13,13 +13,14 @@ import queue
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
-from agentcat_api import ApiClient, Configuration, EventsApi
+from agentcat_api import ApiClient, Configuration, EventsApi, ServerInfoApi
 from agentcat.modules.constants import AGENTCAT_API_URL, EVENT_ID_PREFIX
 
 from ..types import Event, UnredactedEvent
@@ -47,6 +48,19 @@ class _Stop:
 _STOP = _Stop()
 
 
+class _Job:
+    """Work that is not an event, run on the worker in its turn.
+
+    The server info heartbeat sends this way: its redaction and its POST can
+    block, and this thread is the one place in the SDK where blocking is safe.
+    """
+
+    __slots__ = ("run",)
+
+    def __init__(self, run: Callable[[], None]) -> None:
+        self.run = run
+
+
 def _ensure_event_id(event: UnredactedEvent) -> None:
     """Assign a ksuid if the event doesn't already have one."""
     if not event.id:
@@ -57,18 +71,21 @@ class EventQueue:
     """Manages event queue and sending to AgentCat API."""
 
     def __init__(self, api_client=None):
-        self.queue: queue.Queue[UnredactedEvent | _Stop] = queue.Queue(maxsize=10000)
+        self.queue: queue.Queue[UnredactedEvent | _Stop | _Job] = queue.Queue(
+            maxsize=10000
+        )
         self.max_retries = 3
         self.max_queue_size = 10000  # Prevent unbounded growth
         # One publish at a time keeps the thread footprint minimal; the
         # bounded queue absorbs bursts and add() drops on overflow.
         self.concurrency = 1
 
-        # Allow injection of api_client for testing
+        # Allow injection of api_client for testing. The server info heartbeat
+        # sends through the same ApiClient as the events, so an injected events
+        # client brings no server info client.
+        self.server_info_api: ServerInfoApi | None = None
         if api_client is None:
-            config = Configuration(host=AGENTCAT_API_URL)
-            api_client_instance = ApiClient(configuration=config)
-            self.api_client = EventsApi(api_client=api_client_instance)
+            self.configure(AGENTCAT_API_URL)
         else:
             self.api_client = api_client
 
@@ -112,6 +129,7 @@ class EventQueue:
         config = Configuration(host=api_base_url)
         api_client_instance = ApiClient(configuration=config)
         self.api_client = EventsApi(api_client=api_client_instance)
+        self.server_info_api = ServerInfoApi(api_client=api_client_instance)
 
     def add(self, event: UnredactedEvent) -> None:
         """Add event to queue."""
@@ -128,6 +146,20 @@ class EventQueue:
             write_to_log(
                 f"Event queue full, dropping event {event.id or 'unknown'} of type {event.event_type}"
             )
+
+    def add_job(self, run: Callable[[], None]) -> bool:
+        """Queue work for the worker thread. False when it was dropped.
+
+        Never blocks. `run` must not raise; the worker logs it if it does.
+        """
+        if self._shutdown:
+            return False
+        self._ensure_workers()
+        try:
+            self.queue.put_nowait(_Job(run))
+        except queue.Full:
+            return False
+        return True
 
     def _worker(self) -> None:
         """Consumer thread: pulls events straight off the bounded queue.
@@ -152,7 +184,10 @@ class EventQueue:
             with self._lock:
                 self._active += 1
             try:
-                self._process_event(event)
+                if isinstance(event, _Job):
+                    event.run()
+                else:
+                    self._process_event(event)
             except Exception as e:
                 write_to_log(f"Worker thread error (continuing): {e}")
             finally:
@@ -310,7 +345,9 @@ class EventQueue:
         self._stop_workers()
 
         remaining = sum(
-            1 for item in list(self.queue.queue) if not isinstance(item, _Stop)
+            1
+            for item in list(self.queue.queue)
+            if not isinstance(item, (_Stop, _Job))
         )
         if remaining > 0:
             write_to_log(f"Event queue destroyed with {remaining} events unprocessed.")
