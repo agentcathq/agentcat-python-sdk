@@ -16,10 +16,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   The TypeScript and Go SDKs count the same way. Expect numbers about 10 percent lower than the
   estimates that the AgentCat server made before. An error in the estimate never changes the tool
   result (#54).
+- The SDK now sends AgentCat a description of your MCP server: its name, version, title and
+  instructions, and the lists of its tools, resources, resource templates and prompts. About
+  once an hour per process and server name, after your server answers a request, the SDK calls
+  your server's own list handlers and sends the result in the background. In a runtime that
+  keeps no memory between requests, it sends only on a `tools/list` request or a
+  `get_more_tools` call. `redact_sensitive_information` runs on every text; item names and URIs
+  stay as they are. No option changes: the send is on when tracking is on, and a failed send
+  never reaches your server (#58).
 
 ### Changed
 
-- `agentcat` now needs `agentcat-api` 1.0.2, which adds the two token fields (#54).
+- `agentcat` now needs `agentcat-api` 1.0.5, which adds the two token fields (#54) and the server
+  info request (#58).
 
 ### Fixed
 
