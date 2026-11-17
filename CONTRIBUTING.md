@@ -262,9 +262,59 @@ agentcat-python-sdk/
 - **Documentation**: Visit [docs.agentcat.com](https://docs.agentcat.com) for detailed guides
 - **Issues**: Browse [open issues](https://github.com/agentcathq/agentcat-python-sdk/issues) for areas needing help
 
-## Versioning
+## Record your change
 
-The AgentCat team handles versioning and releases. Your contributions will be included in the next appropriate release based on semantic versioning principles.
+Every change that a user can see adds an entry to the `[Unreleased]` section of `CHANGELOG.md`
+in its pull request. The release notes come from this section.
+
+## Release a version
+
+The AgentCat team releases the SDK. The release workflow (`.github/workflows/release.yml`) does
+the release in two steps, with a pull request between them. The Java, Rust and Ruby SDKs release
+the same way.
+
+1. In GitHub, open **Actions > Release > Run workflow** on `main`. Keep `patch`, or type `minor`,
+   `major` or an exact version such as `2.2.0`. The words count from the newest `vX.Y.Z` tag.
+2. The workflow opens the pull request "Release vX.Y.Z". It sets the version in `pyproject.toml`
+   and turns `[Unreleased]` into the dated section of the version. It also starts
+   `mcp-compatibility.yml` on the pull request, for the required check `report-compatibility`. An
+   `[Unreleased]` section with no entry, or a version that PyPI already has, stops the workflow.
+3. Read the pull request, and merge it when CI passes.
+4. The merge starts the workflow again. It waits for the `mcp-compatibility.yml` run of the merge
+   commit, builds the sdist and the wheel, and uploads them to PyPI. Then it creates the tag
+   `vX.Y.Z` and its GitHub release, with the CHANGELOG section as the notes.
+
+If a step fails, fix the cause and re-run the failed jobs of that run. The publish job skips the
+files that PyPI already has, and the tag comes last.
+
+Do not upload to PyPI from your machine. PyPI never accepts a file name twice, not even after you
+delete the file, so a local upload can use up a version for good. Only the release workflow
+publishes.
+
+The workflow releases `X.Y.Z` versions only. A pre-release, such as `2.2.0b1`, stays a manual task:
+set the version in `pyproject.toml`, build with `uv build --no-sources`, and upload the files with
+`uv publish` and a PyPI API token. Do not tag it `vX.Y.Z`, and do not add a dated section for it to
+`CHANGELOG.md`.
+
+To run a step of the workflow by hand, use `python .github/scripts/release.py prepare <patch |
+minor | major | X.Y.Z> <YYYY-MM-DD>`, `status` or `notes <X.Y.Z>`. The script needs only the
+standard library, and the wheel and the sdist do not include it. `tests/test_release.py` tests
+these steps in the normal suite, so CI runs it on each pull request and each push to `main`.
+
+The publish job uses PyPI trusted publishing: PyPI trades the OIDC token of the job for a
+short-lived API token, so GitHub stores no PyPI secret. The upload also adds a PEP 740
+attestation of each file, which PyPI shows on the file page. The job also attests the build
+provenance of the files with Sigstore. To make sure that a file came from this workflow, run
+`gh attestation verify agentcat-X.Y.Z-py3-none-any.whl -R agentcathq/agentcat-python-sdk`.
+
+### One-time setup
+
+- In the repository settings, turn on **Actions > General > Allow GitHub Actions to create and
+  approve pull requests**, so that the workflow can open the release pull request.
+- Create a `release` environment, limited to the `main` branch.
+- On pypi.org, an owner of `agentcat` adds a trusted publisher under **Your projects > agentcat >
+  Manage > Publishing > GitHub**: the owner `agentcathq`, the repository `agentcat-python-sdk`, the
+  workflow `release.yml` and the environment `release`.
 
 ## Recognition
 
