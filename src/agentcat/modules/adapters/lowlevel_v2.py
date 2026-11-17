@@ -60,6 +60,16 @@ from agentcat.modules.exceptions import capture_exception
 from agentcat.modules.injection import ToolSpec, build_injected_schemas
 from agentcat.modules.logging import write_to_log
 from agentcat.modules.request_extra import extra_from_request_context
+from agentcat.modules.server_info import (
+    FEEDBACK_NOTE,
+    LIST_REQUEST,
+    TOOL_CALL,
+    Page,
+    PageFetcher,
+    ServerInfoSource,
+    identity_text,
+)
+from agentcat.modules.server_info import check as check_server_info
 from agentcat.modules.tools import (
     GET_MORE_TOOLS_DESCRIPTION,
     GET_MORE_TOOLS_SCHEMA,
@@ -69,6 +79,101 @@ from agentcat.types import AgentCatData
 
 LIST_METHOD = "tools/list"
 CALL_METHOD = "tools/call"
+
+
+# The lists of the server info heartbeat: the key of each one in the body, its
+# method, and its field on the result model and on a raw mapping.
+_INFO_LISTS = (
+    ("tools", LIST_METHOD, "tools", "tools"),
+    ("resources", "resources/list", "resources", "resources"),
+    (
+        "resourceTemplates",
+        "resources/templates/list",
+        "resource_templates",
+        "resourceTemplates",
+    ),
+    ("prompts", "prompts/list", "prompts", "prompts"),
+)
+
+
+def lists_for_another_request(ctx: Any) -> bool:
+    """Whether a ``tools/list`` pass serves an HTTP request for another method.
+
+    On the 2026 Streamable HTTP path mcp reads the tool list through the
+    registered handler inside a ``tools/call``, to check the ``Mcp-Param-*``
+    headers of the call. That pass gets the HTTP request of the call, and the
+    transport has already made sure that its ``Mcp-Method`` header names the
+    method of its body. A request with no such header (stdio, the older HTTP
+    path) is a client's listing.
+    """
+    try:
+        method = ctx.request.headers.get("mcp-method")
+    except Exception:
+        return False
+    return isinstance(method, str) and method != LIST_METHOD
+
+
+def _list_params(params_type: Any, cursor: Any) -> Any:
+    """The params a client sends for one page of a list.
+
+    A bare-callable registration carries no params type; the SDK's own model
+    is what the runner would hand such a handler.
+    """
+    if params_type is None:
+        from mcp.types import PaginatedRequestParams
+
+        params_type = PaginatedRequestParams
+    return params_type() if cursor is None else params_type(cursor=cursor)
+
+
+def _result_field(result: Any, snake: str, camel: str) -> Any:
+    """A field of a list result, which is a model or a raw mapping."""
+    if isinstance(result, dict):
+        return result.get(camel, result.get(snake))
+    return getattr(result, snake, None)
+
+
+def page_fetcher(
+    handler: Any,
+    params_type: Any,
+    ctx: Any,
+    snake: str,
+    camel: str,
+    finish: Any = None,
+) -> PageFetcher:
+    """Reads one list page by page through its registered handler.
+
+    ``ctx`` is the context of the request that started the heartbeat, so a
+    handler that reads the session or the lifespan state gets the real thing.
+    ``finish`` turns the handler's result into the one a client receives.
+    """
+
+    async def fetch(cursor: Any) -> Page:
+        result = await handler(ctx, _list_params(params_type, cursor))
+        if finish is not None:
+            result = finish(result)
+        return (
+            list(_result_field(result, snake, camel)),
+            _result_field(result, "next_cursor", "nextCursor"),
+        )
+
+    return fetch
+
+
+def list_fetchers(server: Any, ctx: Any) -> dict[str, PageFetcher]:
+    """A fetcher for each list this server has a handler for."""
+    fetchers: dict[str, PageFetcher] = {}
+    for key, method, snake, camel in _INFO_LISTS:
+        entry = _entry(server, method)
+        if entry is not None:
+            fetchers[key] = page_fetcher(
+                _handler_of(entry),
+                getattr(entry, "params_type", None),
+                ctx,
+                snake,
+                camel,
+            )
+    return fetchers
 
 
 def _entry(server: Any, method: str) -> Any:
@@ -226,7 +331,7 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         return state.get(f"orig_{method}")
 
     def advertised_tools(
-        result: Any, options: Any
+        result: Any, options: Any, record: bool = True
     ) -> tuple[list[Any], set[int]] | None:
         """Deep copies of the listed tools, plus get_more_tools when enabled.
 
@@ -238,6 +343,9 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         — and its id() lands in the returned skip set so the callers exclude
         it from injection; one uncopyable tool must not take down the whole
         listing (or, on the rebuild path, brand the call's arguments).
+
+        ``record=False`` leaves the ownership flag alone: the server info
+        heartbeat reads a listing without changing how a call is served.
         """
         nonlocal agentcat_advertises_get_more_tools
         listed = getattr(result, "tools", None)
@@ -259,12 +367,12 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         customer_owns_get_more_tools = any(
             getattr(tool, "name", None) == GET_MORE_TOOLS_NAME for tool in tools
         )
-        agentcat_advertises_get_more_tools = (
-            options.enable_report_missing and not customer_owns_get_more_tools
-        )
+        advertises = options.enable_report_missing and not customer_owns_get_more_tools
+        if record:
+            agentcat_advertises_get_more_tools = advertises
         # Appended before injection so it receives handle parameters too; the
         # context pass skips it by name, so early placement cannot double-inject.
-        if agentcat_advertises_get_more_tools:
+        if advertises:
             tools.append(_make_get_more_tools())
         return tools, skipped
 
@@ -303,11 +411,16 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
         except Exception:
             return None
 
-    async def wrapped_list(ctx: Any, params: Any) -> Any:
-        result = await original(LIST_METHOD)(ctx, params)
+    def injected_listing(result: Any, record: bool = True) -> Any:
+        """The listing a client receives for the customer's ``result``.
+
+        ``record=False`` builds it without writing the registries a later call
+        strips by, which is what the server info heartbeat needs: it reads
+        every page, and a page must not replace what a client's listing wrote.
+        """
         tracking = current_data()
         try:
-            advertised = advertised_tools(result, tracking.options)
+            advertised = advertised_tools(result, tracking.options, record)
             if advertised is None:
                 return result
             tools, skipped = advertised
@@ -317,12 +430,13 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
                 tracking.options,
                 tracking.reported_conflicts,
             )
-            tracking.injected_params_registry = injected.injected_params
-            tracking.output_injection_registry = injected.output_injected
-            # Union, never replace: membership only grows, and a concurrent
-            # listing on another instance may already have recorded a tool this
-            # one did not see.
-            tracking.declared_session_params |= injected.declared_session_params
+            if record:
+                tracking.injected_params_registry = injected.injected_params
+                tracking.output_injection_registry = injected.output_injected
+                # Union, never replace: membership only grows, and a concurrent
+                # listing on another instance may already have recorded a tool
+                # this one did not see.
+                tracking.declared_session_params |= injected.declared_session_params
             for tool, spec in zip(tools, specs, strict=True):
                 if spec is None:
                     continue  # uncopyable tool: served verbatim, never mutated
@@ -340,7 +454,64 @@ def install_lowlevel_v2(server: Any, data: AgentCatData, facade: Any = None) -> 
             )
             return result
 
+    def server_info_source(ctx: Any) -> ServerInfoSource:
+        """What the heartbeat reads from this server, as of right now."""
+        lists = list_fetchers(server, ctx)
+        list_handler = original(LIST_METHOD)
+        if list_handler is None:
+            lists.pop("tools", None)
+        else:
+            # The table holds this adapter's wrapper. The heartbeat goes to the
+            # customer's handler and injects without recording.
+            lists["tools"] = page_fetcher(
+                list_handler,
+                getattr(_entry(server, LIST_METHOD), "params_type", None),
+                ctx,
+                "tools",
+                "tools",
+                finish=lambda result: injected_listing(result, record=False),
+            )
+        return ServerInfoSource(
+            title=identity_text(server, "title"),
+            instructions=identity_text(server, "instructions"),
+            lists=lists,
+        )
+
+    def check_after(ctx: Any, params: Any, is_list: bool) -> None:
+        """Run the heartbeat check for a request this adapter has served.
+
+        Called from a ``finally``, so nothing may leave it: an error here would
+        replace the result of the request.
+        """
+        try:
+            if is_list:
+                if lists_for_another_request(ctx):
+                    return
+                kind = LIST_REQUEST
+            elif (
+                getattr(params, "name", None) == GET_MORE_TOOLS_NAME
+                and agentcat_advertises_get_more_tools
+            ):
+                kind = FEEDBACK_NOTE
+            else:
+                kind = TOOL_CALL
+            check_server_info(current_data(), kind, lambda: server_info_source(ctx))
+        except Exception:
+            return
+
+    async def wrapped_list(ctx: Any, params: Any) -> Any:
+        try:
+            return injected_listing(await original(LIST_METHOD)(ctx, params))
+        finally:
+            check_after(ctx, params, is_list=True)
+
     async def wrapped_call(ctx: Any, params: Any) -> Any:
+        try:
+            return await tracked_call(ctx, params)
+        finally:
+            check_after(ctx, params, is_list=False)
+
+    async def tracked_call(ctx: Any, params: Any) -> Any:
         tracking = current_data()
         options = tracking.options
         name = getattr(params, "name", None) or "Unknown Tool"

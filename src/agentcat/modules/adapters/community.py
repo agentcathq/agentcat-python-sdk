@@ -73,6 +73,14 @@ from agentcat.modules.handles import HandleResolution
 from agentcat.modules.injection import ToolSpec, build_injected_schemas
 from agentcat.modules.logging import write_to_log
 from agentcat.modules.request_extra import extra_from_request_context
+from agentcat.modules.server_info import (
+    FEEDBACK_NOTE,
+    LIST_REQUEST,
+    TOOL_CALL,
+    ServerInfoSource,
+    identity_text,
+)
+from agentcat.modules.server_info import check as check_server_info
 from agentcat.modules.tools import GET_MORE_TOOLS_DESCRIPTION
 from agentcat.types import AgentCatData, ErrorData
 
@@ -133,6 +141,28 @@ def _request_context(context: Any) -> Any:
         return fastmcp_context.request_context if fastmcp_context else None
     except Exception:
         return None
+
+
+def _serves_a_tool_call(request_context: Any) -> bool:
+    """Whether the MCP request behind a ``tools/list`` pass is another method.
+
+    The mcp 1.x lowlevel server fills its tool cache through the ``tools/list``
+    handler in the middle of a ``tools/call``, and under FastMCP 3 that listing
+    runs the middleware chain like a client's. The session knows which request
+    it is answering. mcp 2.x keeps no such table; there the HTTP request says
+    it, on the one path where mcp lists inside a call. A context that says
+    neither is taken to be answering what the middleware was handed.
+    """
+    from agentcat.modules.adapters.lowlevel_v2 import lists_for_another_request
+
+    if lists_for_another_request(request_context):
+        return True
+    try:
+        in_flight = request_context.session._in_flight
+        request = in_flight[request_context.request_id].request
+        return bool(getattr(request, "root", request).method == "tools/call")
+    except Exception:
+        return False
 
 
 def _connection_key(source: Any) -> Any:
@@ -291,9 +321,15 @@ class AgentCatMiddleware:
         if method == "initialize":
             return await self.on_initialize(context, call_next)
         if method == "tools/list":
-            return await self.on_list_tools(context, call_next)
+            try:
+                return await self.on_list_tools(context, call_next)
+            finally:
+                self._check_server_info(context, is_list=True)
         if method == "tools/call":
-            return await self.on_call_tool(context, call_next)
+            try:
+                return await self.on_call_tool(context, call_next)
+            finally:
+                self._check_server_info(context, is_list=False)
         return await call_next(context)
 
     # ── helpers ─────────────────────────────────────────────────────────────
@@ -347,6 +383,75 @@ class AgentCatMiddleware:
             return self._handshake_clients.get(key)
         except TypeError:
             return None
+
+    def _check_server_info(self, context: Any, is_list: bool) -> None:
+        """Run the heartbeat check for a request this middleware has served.
+
+        Called from a ``finally``, so nothing may leave it: an error here would
+        replace the result of the request.
+
+        Three passes do not count as a request of a client. One is the server
+        driving itself from inside a tool call, which the enclosing call
+        answers for. One is a listing or a call made with no MCP request
+        behind it, such as ``server.list_tools()`` at startup: the list
+        handlers need the context of a live request. The last is the listing
+        mcp 1.x makes on its own while it serves a tool call.
+        """
+        try:
+            if _enclosing_frame(self._server) is not None:
+                return
+            request_context = _request_context(context)
+            if request_context is None:
+                return
+            if is_list:
+                if _serves_a_tool_call(request_context):
+                    return
+                kind = LIST_REQUEST
+            elif (
+                getattr(context.message, "name", None) == GET_MORE_TOOLS_NAME
+                and self._registered_get_more_tools is not None
+            ):
+                kind = FEEDBACK_NOTE
+            else:
+                kind = TOOL_CALL
+            check_server_info(
+                self._current_data(),
+                kind,
+                lambda: self._server_info_source(request_context),
+            )
+        except Exception:
+            return
+
+    def _server_info_source(self, request_context: Any) -> ServerInfoSource:
+        """What the heartbeat reads from this server, as of right now.
+
+        The lists come from the handlers FastMCP registered on its lowlevel
+        server, which is what answers a client: they run this middleware, the
+        customer's middleware and FastMCP's own paging. The handler table has
+        the mcp 1.x shape under FastMCP 3 and the mcp 2.x shape under FastMCP 4.
+
+        This runs inside the build task, which starts with a copy of the
+        context of the request. The call frames are emptied in it, so the tool
+        listing is injected like a client's and not served verbatim like a
+        listing from inside a tool call.
+        """
+        _call_frames.set(())
+        lowlevel = self._server._mcp_server
+        if hasattr(lowlevel, "request_handlers"):
+            from agentcat.modules.adapters.lowlevel_v1 import list_fetchers as v1
+
+            lists = v1(lowlevel)
+        else:
+            from agentcat.modules.adapters.lowlevel_v2 import list_fetchers as v2
+
+            # FastMCP 4 hands its middleware a wrapper; the handlers take the
+            # SDK's own request context, which the wrapper carries.
+            lists = v2(lowlevel, getattr(request_context, "_srctx", request_context))
+        return ServerInfoSource(
+            title=identity_text(lowlevel, "title"),
+            instructions=identity_text(lowlevel, "instructions"),
+            lists=lists,
+        )
 
     def _specs(self, tools: list[Any]) -> list[ToolSpec | None]:
         """Copies of the listed schemas, ready for the in-place injection pass.

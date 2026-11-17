@@ -1,11 +1,48 @@
 import os
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
+
+import pytest
 
 # Belt-and-suspenders: force diagnostics off before any test imports/runs, so no
 # test ordering or future change to the auto-disable detection can ever ship OTLP
 # diagnostics to the live collector from our own suite. Diagnostics-specific tests
 # opt back in explicitly with DISABLE_DIAGNOSTICS=false plus mocked HTTP.
 os.environ["DISABLE_DIAGNOSTICS"] = "true"
+
+from agentcat.modules import server_info  # noqa: E402
+
+
+class ServerInfoRecorder:
+    """Stands in for the server info sender: records each body, sends nothing.
+
+    `statuses` holds the answers to give, first to last. With none left, the
+    answer is 202.
+    """
+
+    def __init__(self) -> None:
+        self.bodies: list[dict[str, Any]] = []
+        self.statuses: list[int] = []
+
+    def __call__(self, body: dict[str, Any]) -> int:
+        self.bodies.append(body)
+        return self.statuses.pop(0) if self.statuses else 202
+
+
+# Replaced at import, before any test or fixture can track a server. A
+# heartbeat delivers on a worker thread, so one that is still on its way when
+# its test ends must find a recorder too: the real sender is never put back.
+server_info._send = ServerInfoRecorder()
+
+
+@pytest.fixture(autouse=True)
+def server_info_posts() -> Any:
+    """A fresh recorder and an empty heartbeat memory for every test."""
+    recorder = ServerInfoRecorder()
+    server_info._send = recorder
+    server_info._memory.clear()
+    yield recorder
+    server_info._send = ServerInfoRecorder()
 
 
 # ── Collection gating ────────────────────────────────────────────────────────
