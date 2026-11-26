@@ -1241,9 +1241,10 @@ async def test_v10_no_list_handler_runs_before_the_client_has_its_result(
 
 async def test_v10_the_build_gives_the_loop_a_turn_before_each_page() -> None:
     turns: list[str] = []
+    pages_done = False
 
     async def other_work() -> None:
-        for _ in range(3):
+        while not pages_done:
             turns.append("other")
             await asyncio.sleep(0)
 
@@ -1255,9 +1256,18 @@ async def test_v10_the_build_gives_the_loop_a_turn_before_each_page() -> None:
 
     task = asyncio.ensure_future(other_work())
     await server_info._collect(fetch)
+    pages_done = True
     await task
 
-    assert turns == ["other", "page", "other", "page", "other", "page"]
+    # The other work runs right before each page. The count of its turns between
+    # two pages is not fixed: before Python 3.12, `asyncio.wait_for` runs the fetch
+    # in a task of its own, and that costs one more turn of the loop.
+    assert turns.count("page") == 3
+    assert all(
+        index > 0 and turns[index - 1] == "other"
+        for index, turn in enumerate(turns)
+        if turn == "page"
+    )
 
 
 def test_v10_a_start_that_never_fires_holds_nothing() -> None:

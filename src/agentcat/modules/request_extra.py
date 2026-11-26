@@ -7,6 +7,9 @@ Builds a serializable dict that mirrors the TypeScript SDK's
 HTTP / SSE / Streamable HTTP transports populate `requestInfo.headers` from the
 Starlette `Request`. stdio transports omit `requestInfo` entirely (parity with
 the TS SDK, which only sets `requestInfo` on HTTP-based transports).
+
+The headers are captured as received; the event queue masks the values of
+secret headers such as `authorization` and `cookie` before the event is sent.
 """
 
 from __future__ import annotations

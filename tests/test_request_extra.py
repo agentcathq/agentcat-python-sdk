@@ -352,7 +352,8 @@ class TestExtraOnPublishedEvents:
         assert headers.get("mcp-session-id") == "sess-abc"
         assert extra.get("requestId") == "req-tools-call"
         assert extra.get("sessionId") == "sess-abc"
-        assert extra.get("meta") == {"progressToken": "tok-7"}
+        # The event queue masks values under secret key names such as `progressToken`.
+        assert extra.get("meta") == {"progressToken": "[redacted]"}
 
     @pytest.mark.asyncio
     async def test_transport_session_id_never_becomes_the_task_handle(

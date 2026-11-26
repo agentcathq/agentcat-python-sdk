@@ -94,7 +94,8 @@ async def test_redaction_can_scrub_authorization_header_in_extra(
         auth = headers.get("authorization")
         assert auth is not None
         assert "super-secret-token-xyz" not in auth
-        assert auth == "Bearer [REDACTED]"
+        # The hook runs first; the event queue then masks the whole value.
+        assert auth == "[redacted]"
     finally:
         _set_redact(server, None)
 
