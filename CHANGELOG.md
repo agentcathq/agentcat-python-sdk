@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-26
+
 ### Security
 
 - The SDK now masks sensitive values in every event before the event leaves your server. It tests
@@ -137,7 +139,8 @@ steps.
 The [GitHub releases](https://github.com/agentcathq/agentcat-python-sdk/releases) have the notes
 of 1.0.0 and of the `mcpcat` releases before it.
 
-[Unreleased]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/agentcathq/agentcat-python-sdk/compare/v2.0.1...v2.0.2
