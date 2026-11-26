@@ -186,7 +186,7 @@ class TestEventQueue:
             project_id="project-123",
             session_id="session-123",
             timestamp=datetime.now(timezone.utc),
-            parameters={"secret": "[REDACTED]"},
+            parameters={"query": "[REDACTED]"},
             user_intent="redacted intent",
             redaction_fn=None,  # This should be cleared after redaction
         )
@@ -200,7 +200,7 @@ class TestEventQueue:
             project_id="project-123",
             session_id="session-123",
             timestamp=datetime.now(timezone.utc),
-            parameters={"secret": "password123"},
+            parameters={"query": "password123"},
             user_intent="original intent",
             redaction_fn=mock_redaction_fn,
         )
@@ -211,7 +211,7 @@ class TestEventQueue:
             mock_redact.assert_called_once_with(event, mock_redaction_fn)
             # The send_event should be called with the redacted event
             called_event = mock_send.call_args[0][0]
-            assert called_event.parameters == {"secret": "[REDACTED]"}
+            assert called_event.parameters == {"query": "[REDACTED]"}
             assert called_event.user_intent == "redacted intent"
             assert called_event.redaction_fn is None
             mock_send.assert_called_once()
@@ -232,7 +232,7 @@ class TestEventQueue:
             project_id="project-123",
             session_id="session-123",
             timestamp=datetime.now(timezone.utc),
-            parameters={"arguments": {"token": "hunter2"}},
+            parameters={"arguments": {"query": "hunter2"}},
             user_intent="spend hunter2",
             redaction_fn=lambda s: s.replace("hunter2", "[REDACTED]"),
         )
@@ -241,7 +241,7 @@ class TestEventQueue:
             eq._process_event(event)
 
         sent = mock_send.call_args[0][0]
-        assert sent.parameters == {"arguments": {"token": "[REDACTED]"}}
+        assert sent.parameters == {"arguments": {"query": "[REDACTED]"}}
         assert sent.user_intent == "spend [REDACTED]"
         assert sent.redaction_fn is None
         # Protected: the handle still identifies the task on the dashboard.

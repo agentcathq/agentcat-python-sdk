@@ -133,6 +133,8 @@ agentcat.track(server, "proj_0000000", AgentCatOptions(identify=identify))
 
 AgentCat redacts all data sent to its servers and encrypts at rest, but for additional security, it offers a hook to do your own redaction on all text data returned back to our servers.
 
+Before an event leaves your server, the SDK replaces the value of each key that names a secret (such as the `authorization`, `cookie` and `x-api-key` request headers, or any key with `token`, `secret` or `password` in its name) with `[redacted]`. Your hooks run first and still see the raw values.
+
 ```python
 from agentcat import AgentCatOptions
 

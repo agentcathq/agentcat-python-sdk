@@ -17,6 +17,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Optional, TYPE_CHECKING
 
+import pydantic_core
+
 if TYPE_CHECKING:
     from .telemetry import TelemetryManager
 
@@ -36,6 +38,7 @@ from .internal import get_server_tracking_data
 from .logging import write_to_log
 from .redaction import apply_event_redaction, redact_event
 from .sanitization import sanitize_event
+from .sensitive_keys import mask_sensitive_keys
 from .truncation import truncate_event
 
 # Stamped on every event. Same value 1.x reported, resolved once at import
@@ -66,6 +69,29 @@ class _Job:
 
     def __init__(self, run: Callable[[], None]) -> None:
         self.run = run
+
+
+def _mask_event(event: UnredactedEvent) -> None:
+    """Mask the values of sensitive keys in the payload fields of `event`.
+
+    Each field is first turned into plain data, as truncation does, so the
+    mask sees what is sent. The mask builds new values and never changes the
+    objects it reads. A field that fails is dropped, so the event goes out
+    without it.
+    """
+    for field in ("parameters", "response", "error"):
+        value = getattr(event, field)
+        if value is None:
+            continue
+        try:
+            plain = pydantic_core.to_jsonable_python(value, fallback=str)
+            setattr(event, field, mask_sensitive_keys(plain))
+        except Exception as error:
+            setattr(event, field, None)
+            write_to_log(
+                f"WARNING: Masking failed for {field} of event "
+                f"{event.id or 'unknown'}, sending it without {field}: {error}"
+            )
 
 
 def _ensure_event_id(event: UnredactedEvent) -> None:
@@ -280,6 +306,7 @@ class EventQueue:
             write_to_log(
                 f"WARNING: Sanitization failed for event {event.id or 'unknown'}, sending unsanitized: {error}"
             )
+        _mask_event(event)
         try:
             event = truncate_event(event)
         except Exception as error:
